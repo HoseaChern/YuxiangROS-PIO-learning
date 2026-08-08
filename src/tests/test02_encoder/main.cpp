@@ -3,11 +3,11 @@
 
 namespace {
 
-// ---- 编码器引脚 (编码器0: 32/33, 编码器1: 26/25) ----
-constexpr uint8_t ENC0_PIN_A = 32;
-constexpr uint8_t ENC0_PIN_B = 33;
-constexpr uint8_t ENC1_PIN_A = 26;
-constexpr uint8_t ENC1_PIN_B = 25;
+// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
+constexpr uint8_t ENC0_PIN_A = 4;
+constexpr uint8_t ENC0_PIN_B = 5;
+constexpr uint8_t ENC1_PIN_A = 14;
+constexpr uint8_t ENC1_PIN_B = 15;
 
 // ---- 串口与轮径标定参数 ----
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率

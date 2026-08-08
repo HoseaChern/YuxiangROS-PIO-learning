@@ -3,9 +3,9 @@
 
 namespace {
 
-// ---- 电机引脚 (电机0: 22/23, 电机1: 12/13) ----
-constexpr uint8_t MOTOR0_PIN_A = 22;
-constexpr uint8_t MOTOR0_PIN_B = 23;
+// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+constexpr uint8_t MOTOR0_PIN_A = 10;
+constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
