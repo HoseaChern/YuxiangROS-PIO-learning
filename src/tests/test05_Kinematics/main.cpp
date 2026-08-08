@@ -7,38 +7,46 @@
 namespace {
 
 // ---- 串口参数 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 编码器引脚 (编码器0: 32/33, 编码器1: 26/25) ----
-constexpr uint8_t ENC0_PIN_A = 32;
-constexpr uint8_t ENC0_PIN_B = 33;
-constexpr uint8_t ENC1_PIN_A = 26;
-constexpr uint8_t ENC1_PIN_B = 25;
+// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
 
-// ---- 电机引脚 (电机0: 22/23, 电机1: 12/13) ----
-constexpr uint8_t MOTOR0_PIN_A = 22;
-constexpr uint8_t MOTOR0_PIN_B = 23;
+constexpr uint8_t ENC0_PIN_A = 4;
+constexpr uint8_t ENC0_PIN_B = 5;
+constexpr uint8_t ENC1_PIN_A = 14;
+constexpr uint8_t ENC1_PIN_B = 15;
+
+// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+
+constexpr uint8_t MOTOR0_PIN_A = 10;
+constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
 // ---- PID 参数 ----
+
 constexpr float PID_KP = 0.625f;           // 比例增益
 constexpr float PID_KI = 0.125f;           // 积分增益
 constexpr float PID_KD = 0.0f;             // 微分增益
 constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 
 // ---- 运动学参数 ----
+
 constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
 constexpr float DISTANCE_PER_TICK_MM = 0.1051566f; // 单个脉冲对应的轮子前进距离, 单位 mm
 
 // ---- 目标速度 ----
+
 constexpr float TARGET_LINEAR_SPEED_MM_S = 50.0f;  // 目标线速度, 单位 mm/s
 constexpr float TARGET_ANGULAR_SPEED_RAD_S = 0.1f; // 目标角速度, 单位 rad/s
 
 // ---- 控制周期 ----
+
 constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
 
 // ---- 可变全局状态 (跨 setup/update_and_control 共享) ----
+
 Esp32McpwmMotor motor;           // 电机驱动对象
 Esp32PcntEncoder encoders[2];    // 编码器对象数组
 PIDController pid_controller[2]; // PID 控制器对象数组
@@ -48,6 +56,7 @@ float out_left_speed;  // 逆解输出的左轮目标速度, 单位 mm/s
 float out_right_speed; // 逆解输出的右轮目标速度, 单位 mm/s
 
 // ---- 函数前向声明（内部链接） ----
+
 void update_and_control();
 
 } // namespace
@@ -85,7 +94,7 @@ void setup() {
         out_right_speed
     );
 
-    // PID 更新目标轮速
+    // PID 初始化目标轮速
     pid_controller[0].update_target(out_left_speed);
     pid_controller[1].update_target(out_right_speed);
 }

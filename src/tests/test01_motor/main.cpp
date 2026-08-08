@@ -4,17 +4,20 @@
 namespace {
 
 // ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+
 constexpr uint8_t MOTOR0_PIN_A = 10;
 constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
 // ---- 测试参数 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 constexpr int MOTOR_SPEED = 70;          // 测试转速, 范围 [-100, 100]
 constexpr uint32_t STEP_DELAY_MS = 2000; // 每个方向保持时间, 单位: ms
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
+
 Esp32McpwmMotor motor;
 
 } // namespace

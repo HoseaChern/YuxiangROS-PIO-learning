@@ -4,19 +4,22 @@
 
 namespace {
 
-// ---- 电机引脚 (电机0: 22/23, 电机1: 12/13) ----
-constexpr uint8_t MOTOR0_PIN_A = 22;
-constexpr uint8_t MOTOR0_PIN_B = 23;
+// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+
+constexpr uint8_t MOTOR0_PIN_A = 10;
+constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
-// ---- 编码器引脚 (编码器0: 32/33, 编码器1: 26/25) ----
-constexpr uint8_t ENC0_PIN_A = 32;
-constexpr uint8_t ENC0_PIN_B = 33;
-constexpr uint8_t ENC1_PIN_A = 26;
-constexpr uint8_t ENC1_PIN_B = 25;
+// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
+
+constexpr uint8_t ENC0_PIN_A = 4;
+constexpr uint8_t ENC0_PIN_B = 5;
+constexpr uint8_t ENC1_PIN_A = 14;
+constexpr uint8_t ENC1_PIN_B = 15;
 
 // ---- 串口与控制参数 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 constexpr uint32_t LOOP_DELAY_MS = 10;   // 采样周期, 单位: ms
 constexpr int MOTOR_SPEED = 70;          // 测试转速, 范围 [-100, 100]
@@ -24,9 +27,11 @@ constexpr int MOTOR_SPEED = 70;          // 测试转速, 范围 [-100, 100]
 // ---- 编码器标定参数 ----
 // 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
 // 单位: mm/ms, 等价于 m/s
+
 constexpr float DISTANCE_PER_TICK_MM = 0.1051566f;
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
+
 Esp32McpwmMotor motor;        // 电机驱动对象
 Esp32PcntEncoder encoders[2]; // 编码器对象数组
 

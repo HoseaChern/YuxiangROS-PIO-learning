@@ -15,38 +15,46 @@
 namespace {
 
 // ---- 串口参数 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // ---- 编码器引脚 (编码器0: 32/33, 编码器1: 26/25) ----
+
 constexpr uint8_t ENC0_PIN_A = 32;
 constexpr uint8_t ENC0_PIN_B = 33;
 constexpr uint8_t ENC1_PIN_A = 26;
 constexpr uint8_t ENC1_PIN_B = 25;
 
 // ---- 电机引脚 (电机0: 22/23, 电机1: 12/13) ----
+
 constexpr uint8_t MOTOR0_PIN_A = 22;
 constexpr uint8_t MOTOR0_PIN_B = 23;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
 // ---- PID 参数 ----
+
 constexpr float PID_KP = 0.625f;           // 比例增益
 constexpr float PID_KI = 0.125f;           // 积分增益
 constexpr float PID_KD = 0.0f;             // 微分增益
 constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 
 // ---- 运动学参数 ----
+
 constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
 constexpr float DISTANCE_PER_TICK_MM = 0.1051566f; // 单个脉冲对应的轮子前进距离, 单位 mm
 
 // ---- 默认目标速度 (在收到 /cmd_vel 前使用) ----
+
 constexpr float DEFAULT_LINEAR_SPEED_MM_S = 50.0f;  // 默认目标线速度, 单位 mm/s
 constexpr float DEFAULT_ANGULAR_SPEED_RAD_S = 0.1f; // 默认目标角速度, 单位 rad/s
 
 // ---- 单位换算 ----
+
 constexpr float MPS_TO_MMPS = 1000.0f; // m/s -> mm/s
 
 // ---- 控制周期 ----
+
 constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
 
 // ---- 网络配置 ----
@@ -57,16 +65,19 @@ constexpr char AGENT_IP_STR[] = "192.168.4.136"; // 主机 IP(运行 micro-ROS A
 constexpr uint16_t AGENT_PORT = 8888;            // Agent UDP 端口
 
 // ---- 任务参数 ----
+
 constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间, 单位 ms
 
 // ---- 订阅参数 ----
+
 constexpr uint8_t EXECUTOR_HANDLES = 1;                // 执行器句柄数(1 个订阅)
 constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";           // 速度指令话题名
 constexpr char NODE_NAME[] = "fishbot_motion_control"; // 节点名
 
 // ---- 可变全局状态 (跨 setup/loop/micro_ros_task/twist_callback 共享) ----
+
 Esp32McpwmMotor motor;           // 电机驱动对象
 Esp32PcntEncoder encoders[2];    // 编码器对象数组
 PIDController pid_controller[2]; // PID 控制器对象数组
@@ -76,6 +87,7 @@ float out_left_speed;  // 逆解输出的左轮目标速度, 单位 mm/s
 float out_right_speed; // 逆解输出的右轮目标速度, 单位 mm/s
 
 // micro-ROS 相关结构体对象
+
 rcl_allocator_t allocator;         // 内存分配器, 用于动态内存分配管理
 rclc_support_t support;            // 用于存储时钟、内存分配器和上下文, 提供支持
 rclc_executor_t executor;          // 执行器, 用于管理订阅和计时器回调的执行
@@ -84,6 +96,7 @@ rcl_subscription_t subscriber;     // 订阅者
 geometry_msgs__msg__Twist sub_msg; // 存储订阅到的速度消息
 
 // ---- 函数前向声明（内部链接） ----
+
 void micro_ros_task(void* parameter);
 void twist_callback(const void* msg_in);
 void update_and_control();

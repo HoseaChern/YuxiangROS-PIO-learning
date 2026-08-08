@@ -1,5 +1,5 @@
 /**
- * 
+ * @brief also the test08_micro_ros_platformio
  */
 
 #include <Arduino.h>
@@ -18,6 +18,8 @@
 #include <rclc/executor.h>
 #include <rclc/rclc.h>
 
+#include "secrets.h"
+
 // ============================================================================
 // 全局状态：匿名命名空间限定为本文件（内部链接），符合 C++ 规范
 // 规则: 编译期常量一律 constexpr; 可变全局集中于此并注明被谁跨函数共享
@@ -25,38 +27,44 @@
 namespace {
 
 // ---- 编译期常量 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // 编码器引脚 (编码器0: 4/5, 编码器1: 14/15)
+
 constexpr uint8_t ENC0_PIN_A = 4;
 constexpr uint8_t ENC0_PIN_B = 5;
 constexpr uint8_t ENC1_PIN_A = 14;
 constexpr uint8_t ENC1_PIN_B = 15;
 
 // 电机引脚 (电机0: 10/11, 电机1: 12/13)
+
 constexpr uint8_t MOTOR0_PIN_A = 10;
 constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
 // PID 参数
+
 constexpr float PID_KP = 0.625;           // 比例增益
 constexpr float PID_KI = 0.125;           // 积分增益
 constexpr float PID_KD = 0.0;             // 微分增益
 constexpr float PID_OUTPUT_LIMIT = 100.0; // 输出限幅 ±100
 
 // 运动学参数
+
 constexpr float WHEEL_DISTANCE_MM = 175.0; // 轮间距, 单位 mm
 constexpr float MOTOR_PARAM = 0.1051566;   // 电机标定参数
 
-// 网络配置 (micro_ros_task 内使用; 主机 IP 固定为 192.168.2.120, 见 PIO_网络配置笔记)
+// ---- 网络配置 ----
+// 注意: 凭据必须是可写 char 数组, 因库接口要求 char*, 故不能 constexpr
+// 使用 secrets.h 存储 WIFI_SSID 和 WIFI_PASS
+
 constexpr char AGENT_IP_STR[] = "192.168.2.120"; // 主机 IP(运行 micro-ROS Agent 的电脑)
 constexpr uint16_t AGENT_PORT = 8888;            // Agent UDP 端口
-// 注意: 凭据必须是可写 char 数组, 因库接口要求 char*, 故不能 constexpr
-char WIFI_SSID[] = "Xiaomi_5844";   // 热点 SSID
-char WIFI_PASS[] = "Zhong.2wsxdr5"; // 热点密码
 
 // 任务与定时器参数
+
 constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单位 ms
@@ -67,10 +75,12 @@ constexpr uint32_t SYNC_ATTEMPT_MS = 1000;    // 时间同步单次尝试时长
 constexpr uint32_t SYNC_POLL_MS = 10;         // 时间同步轮询间隔
 
 // 单位换算
+
 constexpr float M_TO_MM = 1000.0; // m/s -> mm/s
 constexpr double S_TO_NS = 1e6;   // 秒 -> 纳秒 (时间戳换算)
 
 // ---- 可变全局状态 (跨函数共享, 需长期存活) ----
+
 Esp32McpwmMotor motor;           // 电机控制 (setup/loop 共享)
 Esp32PcntEncoder encoders[2];    // 编码器 (setup/loop 共享)
 PIDController pid_controller[2]; // PID 控制器 (twist_callback/loop 共享)
@@ -80,9 +90,11 @@ nav_msgs__msg__Odometry pub_msg; // 里程计消息 (odom_callback 填充, micro
 rcl_publisher_t publisher;       // 里程计发布者 (micro_ros_task 初始化)
 
 // ---- 函数前向声明（内部链接; 经函数指针传给 micro-ROS/FreeRTOS, 链接性不影响取址）----
+
 void twist_callback(const void* msgin);
 void odom_callback(rcl_timer_t* timer, int64_t last_call_time);
 void micro_ros_task(void* parameter);
+void update_and_control();
 
 } // namespace
 
@@ -134,12 +146,7 @@ void setup() {
 void loop() {
     delay(LOOP_DELAY_MS);
 
-    // 更新电机速度和编码器数据
-    kinematics.update_motor_speed(millis(), encoders[0].getTicks(), encoders[1].getTicks());
-
-    // PID更新电机速度
-    motor.updateMotorSpeed(0, pid_controller[0].update(kinematics.get_motor_speed(0)));
-    motor.updateMotorSpeed(1, pid_controller[1].update(kinematics.get_motor_speed(1)));
+    update_and_control();
 
     // 输出里程计数据
     Serial.printf(
@@ -291,6 +298,19 @@ void micro_ros_task(void* parameter) {
 
     // 10. 循环执行器
     rclc_executor_spin(&executor);
+}
+
+/**
+ * @brief 更新编码器速度并通过 PID 控制电机输出
+ *
+ * 调用运动学 update_motor_speed 根据编码器 tick 计算当前轮速,
+ * 再经 PID 控制器输出 PWM 值更新电机。
+ */
+void update_and_control() {
+    kinematics.update_motor_speed(millis(), encoders[0].getTicks(), encoders[1].getTicks());
+
+    motor.updateMotorSpeed(0, pid_controller[0].update(kinematics.get_motor_speed(0)));
+    motor.updateMotorSpeed(1, pid_controller[1].update(kinematics.get_motor_speed(1)));
 }
 
 } // namespace

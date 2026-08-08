@@ -3,6 +3,7 @@
 namespace {
 
 // ---- 串口参数 ----
+
 constexpr uint32_t SERIAL_BAUD = 115200;     // 串口波特率
 constexpr uint32_t PRINT_INTERVAL_MS = 1000; // 打印间隔, 单位: ms
 
