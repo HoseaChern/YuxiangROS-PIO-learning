@@ -93,6 +93,13 @@ void setup() {
 void loop() {
     delay(LOOP_DELAY_MS);
     update_and_control();
+
+    Serial.printf(
+        "x = %f, y = %f, yaw = %f\n",
+        kinematics.get_odom().x,
+        kinematics.get_odom().y,
+        kinematics.get_odom().yaw
+    );
 }
 
 namespace {
