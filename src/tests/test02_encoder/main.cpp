@@ -33,7 +33,7 @@ void loop() {
     int32_t tick0 = encoders[0].getTicks();
     int32_t tick1 = encoders[1].getTicks();
 
-    Serial.printf("tick1=%d,tick2=%d", tick0, tick1);
+    Serial.printf("tick1=%d,tick2=%d\n", tick0, tick1);
 }
 
 /**
