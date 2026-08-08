@@ -1,0 +1,70 @@
+#ifndef KINEMATICS_H
+#define KINEMATICS_H
+
+#include <Arduino.h>
+
+// 电机参数
+using motor_param_t = struct motor_param_t {
+    float per_pulse_distance;  // 单个脉冲对应轮子前近距离, 单位 mm
+    int16_t motor_speed;       // 电机速度, 单位 mm/ms = m/s
+    int64_t last_encoder_tick; // 上次编码器计数值
+};
+
+// 里程计参数
+using odom_t = struct odom_t {
+    float x;                // x 坐标, 单位 mm
+    float y;                // y 坐标, 单位 mm
+    float yaw;              // 偏航角, 单位 rad
+    float linear_velocity;  // 线速度, 单位 mm/s
+    float angular_velocity; // 角速度, 单位 rad/s
+};
+
+/**
+ * @brief 运动学计算类
+ * 
+ * @note 
+ * 运动学正逆解: \note
+ * 正解: 轮转速 -> 直线速度和角速度 \note
+ * 正解公式: \note
+ * v = (v_left + v_right) / 2; omega = (v_right - v_left) / wheel_distance \note
+ * 逆解: 直线速度和角速度 -> 轮转速 \note
+ * 逆解公式: \note
+ * v_left = v - omega * wheel_distance / 2; v_right = v + omega * wheel_distance / 2 \note
+ * 
+ * 里程计: \note
+ * 里程计公式: \note
+ * x = x + v * cos(yaw) * dt; y = y + v * sin(yaw) * dt; yaw = yaw + omega * dt \note
+ */
+class Kinematics {
+  private:
+    motor_param_t motor_params_[2]; // 存储电机参数
+    uint64_t last_update_time_;     // 上次更新数据的时间, 单位 ms
+    float wheel_distance_;          // 轮子间距, 单位 mm
+    odom_t odom_;                   // 存储里程计参数
+
+  public:
+    Kinematics() = default;  // 默认构造函数
+    ~Kinematics() = default; // 默认析构函数
+
+    void set_motor_param(uint8_t motor_id, float per_pulse_distance); // 设置电机参数
+    void set_wheel_distance(float wheel_distance);                    // 设置轮子间距
+
+    void kinematics_forward(
+        float left_speed, float right_speed, float& output_linear_velocity,
+        float& output_angular_velocity
+    ); // 运动学正解
+    void kinematics_inverse(
+        float linear_velocity, float angular_velocity, float& output_left_speed,
+        float& output_right_speed
+    ); // 运动学逆解
+
+    // 更新电机速度和编码器数据
+    void update_motor_speed(uint64_t current_time, int32_t left_tick, int32_t right_tick);
+    int16_t get_motor_speed(uint8_t motor_id); // 获取电机速度
+
+    void update_odom(uint16_t dt);                                // 更新里程计数据
+    odom_t& get_odom();                                           // 获取里程计数据
+    static void TransAngleInPI(float angle, float& output_angle); //将角度转换为-PI到PI之间
+};
+
+#endif // KINEMATICS_H
