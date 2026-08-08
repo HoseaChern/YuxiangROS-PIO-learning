@@ -42,14 +42,9 @@ constexpr float TARGET_SPEED_MM_S = 100.0f; // 目标轮速, 单位 mm/s
 
 // ---- 可变全局状态 (跨 setup/loop/motor_speed_control 共享) ----
 
-Esp32McpwmMotor motor;           // 电机驱动对象
-Esp32PcntEncoder encoders[2];    // 编码器对象数组
-PIDController pid_controller[2]; // PID 控制器对象数组
-
-int64_t last_ticks[2];     // 上一次读取的计数器数值
-int32_t delta_ticks[2];    // 两次读取之间的计数器差值
-uint64_t last_update_time; // 上一次更新时间
-float current_speeds[2];   // 当前两个电动机的速度, 单位 mm/s
+Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
+PIDController pid_controller[2]; // PID 控制器对象数组 (setup/loop 共享)
 
 // ---- 函数前向声明（内部链接） ----
 
@@ -80,11 +75,6 @@ void setup() {
     // 初始化目标速度, 单位 mm/s
     pid_controller[0].update_target(TARGET_SPEED_MM_S);
     pid_controller[1].update_target(TARGET_SPEED_MM_S);
-
-    // 初始化采样基线, 避免首次控制周期时间差过大
-    last_update_time = millis();
-    last_ticks[0] = encoders[0].getTicks();
-    last_ticks[1] = encoders[1].getTicks();
 }
 
 void loop() {
@@ -101,9 +91,24 @@ namespace {
  * 并在串口打印当前速度。
  */
 void motor_speed_control() {
-    // 计算时间差
+    // 静态局部变量: 采样基线跨多次调用保持
+    static uint64_t last_update_time = 0;  // 上一次更新时间
+    static int64_t last_ticks[2] = {0, 0}; // 上一次读取的计数器数值
+    static bool is_first_run = true;       // 首次进入标志
+
+    if (is_first_run) {
+        // 初始化采样基线, 避免首次控制周期时间差过大
+        last_update_time = millis();
+        last_ticks[0] = encoders[0].getTicks();
+        last_ticks[1] = encoders[1].getTicks();
+        is_first_run = false;
+    }
+
+    // 普通局部变量: 每次调用重新计算的临时量
     uint64_t now = millis();
     uint64_t dt = now - last_update_time;
+    int32_t delta_ticks[2];  // 两次读取之间的计数器差值
+    float current_speeds[2]; // 当前两个电动机的速度, 单位 mm/s
 
     // 计算编码器差值
     delta_ticks[0] = static_cast<int32_t>(encoders[0].getTicks() - last_ticks[0]);

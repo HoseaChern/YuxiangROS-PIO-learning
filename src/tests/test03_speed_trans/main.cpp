@@ -32,13 +32,8 @@ constexpr float DISTANCE_PER_TICK_MM = 0.1051566f;
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
 
-Esp32McpwmMotor motor;        // 电机驱动对象
-Esp32PcntEncoder encoders[2]; // 编码器对象数组
-
-int64_t last_ticks[2];     // 上一次读取的计数器数值
-int32_t delta_ticks[2];    // 两次读取之间的计数器差值
-uint64_t last_update_time; // 上一次更新时间
-float current_speeds[2];   // 当前两个电动机的速度
+Esp32McpwmMotor motor;        // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2]; // 编码器对象数组 (setup/loop 共享)
 
 } // namespace
 
@@ -57,19 +52,29 @@ void setup() {
     motor.attachMotor(1, MOTOR1_PIN_A, MOTOR1_PIN_B);
     motor.updateMotorSpeed(0, MOTOR_SPEED);
     motor.updateMotorSpeed(1, MOTOR_SPEED);
-
-    // 初始化采样基线, 避免首次 loop 时间差过大
-    last_update_time = millis();
-    last_ticks[0] = encoders[0].getTicks();
-    last_ticks[1] = encoders[1].getTicks();
 }
 
 void loop() {
     delay(LOOP_DELAY_MS);
 
-    // 计算时间差
+    // 静态局部变量: 采样基线跨多次调用保持
+    static uint64_t last_update_time = 0;  // 上一次更新时间
+    static int64_t last_ticks[2] = {0, 0}; // 上一次读取的计数器数值
+    static bool is_first_run = true;       // 首次进入标志
+
+    if (is_first_run) {
+        // 初始化采样基线, 避免首次循环时间差过大
+        last_update_time = millis();
+        last_ticks[0] = encoders[0].getTicks();
+        last_ticks[1] = encoders[1].getTicks();
+        is_first_run = false;
+    }
+
+    // 普通局部变量: 每次循环重新计算的临时量
     uint64_t now = millis();
     uint64_t dt = now - last_update_time;
+    int32_t delta_ticks[2];  // 两次读取之间的计数器差值
+    float current_speeds[2]; // 当前两个电动机的速度
 
     // 计算编码器差值
     delta_ticks[0] = static_cast<int32_t>(encoders[0].getTicks() - last_ticks[0]);

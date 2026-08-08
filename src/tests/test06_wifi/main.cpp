@@ -68,20 +68,10 @@ constexpr uint8_t EXECUTOR_HANDLES = 0;          // 执行器句柄数
 
 // ---- 可变全局状态 (跨 setup/loop/micro_ros_task 共享) ----
 
-Esp32McpwmMotor motor;           // 电机驱动对象
-Esp32PcntEncoder encoders[2];    // 编码器对象数组
-PIDController pid_controller[2]; // PID 控制器对象数组
-Kinematics kinematics;           // 运动学正逆解对象
-
-float out_left_speed;  // 逆解输出的左轮目标速度, 单位 mm/s
-float out_right_speed; // 逆解输出的右轮目标速度, 单位 mm/s
-
-// micro-ROS 相关结构体对象
-
-rcl_allocator_t allocator; // 内存分配器, 用于动态内存分配管理
-rclc_support_t support;    // 用于存储时钟、内存分配器和上下文, 提供支持
-rclc_executor_t executor;  // 执行器, 用于管理订阅和计时器回调的执行
-rcl_node_t node;           // ROS 节点
+Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
+PIDController pid_controller[2]; // PID 控制器对象数组 (setup/loop 共享)
+Kinematics kinematics;           // 运动学正逆解对象 (setup/loop 共享)
 
 // ---- 函数前向声明（内部链接） ----
 
@@ -116,16 +106,19 @@ void setup() {
     kinematics.set_motor_param(1, DISTANCE_PER_TICK_MM);
 
     // 运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
+    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量
+    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量
     kinematics.kinematics_inverse(
         TARGET_LINEAR_SPEED_MM_S,
         TARGET_ANGULAR_SPEED_RAD_S,
-        out_left_speed,
-        out_right_speed
+        output_left_speed,
+        output_right_speed
     );
 
-    // PID 更新目标轮速
-    pid_controller[0].update_target(out_left_speed);
-    pid_controller[1].update_target(out_right_speed);
+    // PID 初始化目标轮速
+    pid_controller[0].update_target(output_left_speed);
+    pid_controller[1].update_target(output_right_speed);
 
     // 创建任务运行 micro-ROS
     // 参数依次为: 任务函数, 任务名称, 任务堆栈字节数, 传递给任务函数的参数, 任务优先级, 任务句柄
@@ -149,6 +142,12 @@ namespace {
  */
 void micro_ros_task(void* parameter) {
     (void)parameter; // 显式转换为 void，告诉编译器"我故意不用"
+
+    // 静态局部变量: 仅本函数使用, 声明为 static 保持任务期间有效 (仿照 main.cpp)
+    static rcl_allocator_t allocator; // 内存分配器, 用于动态内存分配管理
+    static rclc_support_t support; // 用于存储时钟、内存分配器和上下文, 提供支持
+    static rclc_executor_t executor; // 执行器, 用于管理订阅和计时器回调的执行
+    static rcl_node_t node;          // ROS 节点
 
     // 1. 设置传输协议并延时等待设置完成
     IPAddress agent_ip;

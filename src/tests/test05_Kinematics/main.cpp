@@ -47,13 +47,10 @@ constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
 
 // ---- 可变全局状态 (跨 setup/update_and_control 共享) ----
 
-Esp32McpwmMotor motor;           // 电机驱动对象
-Esp32PcntEncoder encoders[2];    // 编码器对象数组
-PIDController pid_controller[2]; // PID 控制器对象数组
-Kinematics kinematics;           // 运动学正逆解对象
-
-float out_left_speed;  // 逆解输出的左轮目标速度, 单位 mm/s
-float out_right_speed; // 逆解输出的右轮目标速度, 单位 mm/s
+Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
+PIDController pid_controller[2]; // PID 控制器对象数组 (setup/loop 共享)
+Kinematics kinematics;           // 运动学正逆解对象 (setup/loop 共享)
 
 // ---- 函数前向声明（内部链接） ----
 
@@ -87,16 +84,19 @@ void setup() {
     kinematics.set_motor_param(1, DISTANCE_PER_TICK_MM);
 
     // 运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
+    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量
+    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量
     kinematics.kinematics_inverse(
         TARGET_LINEAR_SPEED_MM_S,
         TARGET_ANGULAR_SPEED_RAD_S,
-        out_left_speed,
-        out_right_speed
+        output_left_speed,
+        output_right_speed
     );
 
     // PID 初始化目标轮速
-    pid_controller[0].update_target(out_left_speed);
-    pid_controller[1].update_target(out_right_speed);
+    pid_controller[0].update_target(output_left_speed);
+    pid_controller[1].update_target(output_right_speed);
 }
 
 void loop() {

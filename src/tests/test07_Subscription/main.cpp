@@ -18,17 +18,17 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 编码器引脚 (编码器0: 32/33, 编码器1: 26/25) ----
+// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
 
-constexpr uint8_t ENC0_PIN_A = 32;
-constexpr uint8_t ENC0_PIN_B = 33;
-constexpr uint8_t ENC1_PIN_A = 26;
-constexpr uint8_t ENC1_PIN_B = 25;
+constexpr uint8_t ENC0_PIN_A = 4;
+constexpr uint8_t ENC0_PIN_B = 5;
+constexpr uint8_t ENC1_PIN_A = 14;
+constexpr uint8_t ENC1_PIN_B = 15;
 
-// ---- 电机引脚 (电机0: 22/23, 电机1: 12/13) ----
+// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 22;
-constexpr uint8_t MOTOR0_PIN_B = 23;
+constexpr uint8_t MOTOR0_PIN_A = 10;
+constexpr uint8_t MOTOR0_PIN_B = 11;
 constexpr uint8_t MOTOR1_PIN_A = 12;
 constexpr uint8_t MOTOR1_PIN_B = 13;
 
@@ -78,22 +78,10 @@ constexpr char NODE_NAME[] = "fishbot_motion_control"; // 节点名
 
 // ---- 可变全局状态 (跨 setup/loop/micro_ros_task/twist_callback 共享) ----
 
-Esp32McpwmMotor motor;           // 电机驱动对象
-Esp32PcntEncoder encoders[2];    // 编码器对象数组
-PIDController pid_controller[2]; // PID 控制器对象数组
-Kinematics kinematics;           // 运动学正逆解对象
-
-float out_left_speed;  // 逆解输出的左轮目标速度, 单位 mm/s
-float out_right_speed; // 逆解输出的右轮目标速度, 单位 mm/s
-
-// micro-ROS 相关结构体对象
-
-rcl_allocator_t allocator;         // 内存分配器, 用于动态内存分配管理
-rclc_support_t support;            // 用于存储时钟、内存分配器和上下文, 提供支持
-rclc_executor_t executor;          // 执行器, 用于管理订阅和计时器回调的执行
-rcl_node_t node;                   // ROS 节点
-rcl_subscription_t subscriber;     // 订阅者
-geometry_msgs__msg__Twist sub_msg; // 存储订阅到的速度消息
+Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
+PIDController pid_controller[2]; // PID 控制器对象数组 (setup/twist_callback/loop 共享)
+Kinematics kinematics;           // 运动学正逆解对象 (setup/twist_callback/loop 共享)
 
 // ---- 函数前向声明（内部链接） ----
 
@@ -129,14 +117,19 @@ void setup() {
     kinematics.set_motor_param(1, DISTANCE_PER_TICK_MM);
 
     // 默认目标速度, 避免订阅消息到达前电机无目标
+    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量
+    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量
     kinematics.kinematics_inverse(
         DEFAULT_LINEAR_SPEED_MM_S,
         DEFAULT_ANGULAR_SPEED_RAD_S,
-        out_left_speed,
-        out_right_speed
+        output_left_speed,
+        output_right_speed
     );
-    pid_controller[0].update_target(out_left_speed);
-    pid_controller[1].update_target(out_right_speed);
+
+    // PID 初始化目标轮速
+    pid_controller[0].update_target(output_left_speed);
+    pid_controller[1].update_target(output_right_speed);
 
     // 创建任务运行 micro-ROS
     xTaskCreate(micro_ros_task, "micro_ros", MICRO_ROS_STACK_SIZE, NULL, MICRO_ROS_TASK_PRIO, NULL);
@@ -161,15 +154,19 @@ void twist_callback(const void* msg_in) {
         static_cast<const geometry_msgs__msg__Twist*>(msg_in);
 
     // 运动学逆解: linear.x 单位 m/s 转换为 mm/s, angular.z 单位 rad/s
+    // 逆解输出仅本次调用使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量
+    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量
     kinematics.kinematics_inverse(
         twist_msg->linear.x * MPS_TO_MMPS,
         twist_msg->angular.z,
-        out_left_speed,
-        out_right_speed
+        output_left_speed,
+        output_right_speed
     );
 
-    pid_controller[0].update_target(out_left_speed);
-    pid_controller[1].update_target(out_right_speed);
+    // PID 更新目标轮速
+    pid_controller[0].update_target(output_left_speed);
+    pid_controller[1].update_target(output_right_speed);
 }
 
 /**
@@ -181,6 +178,14 @@ void twist_callback(const void* msg_in) {
  */
 void micro_ros_task(void* parameter) {
     (void)parameter;
+
+    // 静态局部变量: 仅本函数使用, 声明为 static 保持任务期间有效 (仿照 main.cpp)
+    static rcl_allocator_t allocator; // 内存分配器, 用于动态内存分配管理
+    static rclc_support_t support; // 用于存储时钟、内存分配器和上下文, 提供支持
+    static rclc_executor_t executor; // 执行器, 用于管理订阅和计时器回调的执行
+    static rcl_node_t node;          // ROS 节点
+    static rcl_subscription_t subscriber;     // 订阅者
+    static geometry_msgs__msg__Twist sub_msg; // 存储订阅到的速度消息
 
     // 1. 设置传输协议并延时等待设置完成
     IPAddress agent_ip;
