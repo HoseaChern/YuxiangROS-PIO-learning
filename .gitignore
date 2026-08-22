@@ -2,3 +2,5 @@
 .vscode/
 
 lib/Secrets/secrets.h
+
+compile_commands.json
