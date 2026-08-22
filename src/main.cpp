@@ -54,7 +54,7 @@ constexpr float PID_OUTPUT_LIMIT = 100.0; // 输出限幅 ±100
 // 运动学参数
 
 constexpr float WHEEL_DISTANCE_MM = 175.0; // 轮间距, 单位 mm
-constexpr float MOTOR_PARAM = 0.1051566;   // 电机标定参数
+constexpr float MOTOR_PARAM = 0.1427138f;  // 电机标定参数
 
 // ---- 网络配置 ----
 // 注意: 凭据必须是可写 char 数组, 因库接口要求 char*, 故不能 constexpr
@@ -69,10 +69,10 @@ constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单位 ms
 constexpr uint32_t LOOP_DELAY_MS = 10;           // 主循环调度节拍
-constexpr uint8_t EXECUTOR_HANDLES = 2;       // 执行器句柄数(速度订阅+里程计定时器)
-constexpr uint32_t TRANSPORT_SETUP_MS = 2000; // 传输层设置等待时间
-constexpr uint32_t SYNC_ATTEMPT_MS = 1000;    // 时间同步单次尝试时长
-constexpr uint32_t SYNC_POLL_MS = 10;         // 时间同步轮询间隔
+constexpr uint8_t EXECUTOR_HANDLES = 2;          // 执行器句柄数(速度订阅+里程计定时器)
+constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间
+constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长
+constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔
 
 // 单位换算
 
@@ -125,7 +125,7 @@ void setup() {
     const float target_linear_velocity = 50.0; // 目标线速度, 单位 mm/s
     const float target_angular_velocity = 0.1; // 目标角速度, 单位 rad/s
 
-    float output_left_speed; // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
     float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
     kinematics.kinematics_inverse(
         target_linear_velocity,
@@ -174,7 +174,7 @@ void twist_callback(const void* msgin) {
         static_cast<const geometry_msgs__msg__Twist*>(msgin);
 
     // 计算运动学逆解
-    float output_left_speed; // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
+    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
     float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
     kinematics.kinematics_inverse(
         twist_msg->linear.x * M_TO_MM, // 单位换算, m/s -> mm/s

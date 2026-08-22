@@ -32,7 +32,7 @@ constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 
 // ---- 速度计算参数 ----
 
-constexpr float DISTANCE_PER_TICK_MM = 0.1051566f; // 单个脉冲对应的轮子前进距离, 单位 mm
+constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
 constexpr float MS_TO_S = 1000.0f;                 // mm/ms -> mm/s 换算系数
 constexpr uint32_t LOOP_DELAY_MS = 10;             // 控制周期, 单位 ms
 

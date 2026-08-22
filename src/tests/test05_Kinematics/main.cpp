@@ -34,7 +34,7 @@ constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 // ---- 运动学参数 ----
 
 constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
-constexpr float DISTANCE_PER_TICK_MM = 0.1051566f; // 单个脉冲对应的轮子前进距离, 单位 mm
+constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
 
 // ---- 目标速度 ----
 

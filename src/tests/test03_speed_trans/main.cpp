@@ -28,7 +28,7 @@ constexpr int MOTOR_SPEED = 70;          // 测试转速, 范围 [-100, 100]
 // 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
 // 单位: mm/ms, 等价于 m/s
 
-constexpr float DISTANCE_PER_TICK_MM = 0.1051566f;
+constexpr float DISTANCE_PER_TICK_MM = 0.1427138f;
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
 

@@ -42,7 +42,7 @@ constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 // ---- 运动学参数 ----
 
 constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
-constexpr float DISTANCE_PER_TICK_MM = 0.1051566f; // 单个脉冲对应的轮子前进距离, 单位 mm
+constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
 
 // ---- 默认目标速度 (在收到 /cmd_vel 前使用) ----
 
@@ -180,10 +180,10 @@ void micro_ros_task(void* parameter) {
     (void)parameter;
 
     // 静态局部变量: 仅本函数使用, 声明为 static 保持任务期间有效 (仿照 main.cpp)
-    static rcl_allocator_t allocator; // 内存分配器, 用于动态内存分配管理
-    static rclc_support_t support; // 用于存储时钟、内存分配器和上下文, 提供支持
-    static rclc_executor_t executor; // 执行器, 用于管理订阅和计时器回调的执行
-    static rcl_node_t node;          // ROS 节点
+    static rcl_allocator_t allocator;         // 内存分配器, 用于动态内存分配管理
+    static rclc_support_t support;            // 用于存储时钟、内存分配器和上下文, 提供支持
+    static rclc_executor_t executor;          // 执行器, 用于管理订阅和计时器回调的执行
+    static rcl_node_t node;                   // ROS 节点
     static rcl_subscription_t subscriber;     // 订阅者
     static geometry_msgs__msg__Twist sub_msg; // 存储订阅到的速度消息
 
