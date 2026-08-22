@@ -225,11 +225,16 @@ NamespaceIndentation: None
 ### 文件 4：`.gitignore` 追加
 
 ```text
+.cache/
 compile_commands.json
 ```
 
-`compile_commands.json` 是本机生成物（2MB+，含绝对路径），不入库。`.pio/`、
-`.vscode/` 原本已忽略。
+- `compile_commands.json` 是本机生成物（2MB+，含绝对路径），不入库。
+- `.cache/` 是 clangd 在 `--background-index` 模式下生成的磁盘索引缓存
+  （`~/.cache/clangd/index/*.idx`，项目内为 `.cache/clangd/index/`），存放
+  各头文件/源文件的预解析符号索引，用于加速跨文件跳转与补全。可安全删除，
+  clangd 会自动重建（首次重建时补全略慢）。
+- `.pio/`、`.vscode/` 原本已忽略。
 
 ## 步骤四：生成 compile_commands.json（12 环境合并）
 
@@ -304,6 +309,7 @@ EOF
 | cpptools 与 clangd 同时弹诊断          | 确认 `C_Cpp.intelliSenseEngine: disabled`，重载窗口             |
 | 调试无法用 CodeLLDB                    | Xtensa 无 LLDB 支持，改用 PIO 的 platformio-debug (gdb)          |
 | 头文件可解析但格式化不生效             | 确认 `[c]`/`[cpp]` 的 defaultFormatter 为 clangd 扩展 ID         |
+| 跳转/补全异常（索引陈旧）             | 删除 `.cache/` 让 clangd 全新重建索引，改后重载窗口              |
 
 ## 附录：本机已装环境记录
 
@@ -317,3 +323,4 @@ EOF
 | clangd / clang-format   | 21.1.8（/usr/bin，update-alternatives 注册）                     |
 | 环境数量                | 12（1 主 + 4 example + 7 test）                                  |
 | compile_commands.json   | 91 条，合并去重后全为绝对路径，不入库                            |
+| clangd 索引缓存         | `.cache/clangd/index/`（约 2.7MB，可删自动重建，不入库）         |
