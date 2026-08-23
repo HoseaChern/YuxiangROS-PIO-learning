@@ -75,8 +75,8 @@ void setup() {
     // 初始化 PID 控制器参数
     pid_controller[0].update_PID(PID_KP, PID_KI, PID_KD);
     pid_controller[1].update_PID(PID_KP, PID_KI, PID_KD);
-    pid_controller[0].output_limit(-PID_OUTPUT_LIMIT, PID_OUTPUT_LIMIT);
-    pid_controller[1].output_limit(-PID_OUTPUT_LIMIT, PID_OUTPUT_LIMIT);
+    pid_controller[0].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
+    pid_controller[1].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
 
     // 初始化轮子间距和电动机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);

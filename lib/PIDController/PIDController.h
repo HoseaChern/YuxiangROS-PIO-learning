@@ -15,12 +15,11 @@
  */
 class PIDController {
   private:
-    float target_;     // 目标值
-    float output_min_; // 输出下限
-    float output_max_; // 输出上限
-    float kp_;         // 比例系数
-    float ki_;         // 积分系数
-    float kd_;         // 微分系数
+    float target_;       // 目标值
+    float output_limit_; // 输出限幅 (对称 ±output_limit_)
+    float kp_;           // 比例系数
+    float ki_;           // 积分系数
+    float kd_;           // 微分系数
 
     float error_sum_;              // 误差累积和
     float d_error_;                // 误差变化率
@@ -36,7 +35,7 @@ class PIDController {
     void update_target(float target);                // 更新目标值
     void update_PID(float kp, float ki, float kd);   // 更新PID系数
     void reset();                                    // 重置PID控制器
-    void output_limit(float out_min, float out_max); // 设置输出上下限
+    void output_limit(float limit);                  // 设置输出限幅, 对称限制在 [-limit, limit]
 };
 
 #endif // PIDCONTROLLER_H

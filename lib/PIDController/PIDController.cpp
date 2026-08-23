@@ -24,17 +24,17 @@ float PIDController::update(float current) {
     if (error_sum_ > intergral_sup_) {
         error_sum_ = intergral_sup_; // 控制上界
     }
-    if (error_sum_ < -1 * intergral_sup_) {
-        error_sum_ = -1 * intergral_sup_; // 控制下界
+    if (error_sum_ < -intergral_sup_) {
+        error_sum_ = -intergral_sup_; // 控制下界
     }
 
     // 计算输出并进行输出限制
     float output = kp_ * error + ki_ * error_sum_ + kd_ * d_error_;
-    if (output > output_max_) {
-        output = output_max_;
+    if (output > output_limit_) {
+        output = output_limit_;
     }
-    if (output < -1 * output_max_) {
-        output = -1 * output_max_;
+    if (output < -output_limit_) {
+        output = -output_limit_;
     }
 
     return output;
@@ -51,8 +51,7 @@ void PIDController::update_PID(float kp, float ki, float kd) {
 
 void PIDController::reset() {
     target_ = 0.0;
-    output_max_ = 0.0;
-    output_min_ = 0.0;
+    output_limit_ = 0.0;
     kp_ = 0.0;
     ki_ = 0.0;
     kd_ = 0.0;
@@ -62,7 +61,6 @@ void PIDController::reset() {
     d_error_ = 0.0;
 }
 
-void PIDController::output_limit(float max, float min) {
-    output_max_ = max;
-    output_min_ = min;
+void PIDController::output_limit(float limit) {
+    output_limit_ = limit;
 }
