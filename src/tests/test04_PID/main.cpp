@@ -9,19 +9,19 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
+// ---- 电机引脚 (电机0: 4/15, 电机1: 7/6) ----
 
-constexpr uint8_t ENC0_PIN_A = 4;
-constexpr uint8_t ENC0_PIN_B = 5;
-constexpr uint8_t ENC1_PIN_A = 14;
-constexpr uint8_t ENC1_PIN_B = 15;
+constexpr uint8_t MOTOR0_PIN_A = 4;
+constexpr uint8_t MOTOR0_PIN_B = 5;
+constexpr uint8_t MOTOR1_PIN_A = 7;
+constexpr uint8_t MOTOR1_PIN_B = 6;
 
-// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 10;
-constexpr uint8_t MOTOR0_PIN_B = 11;
-constexpr uint8_t MOTOR1_PIN_A = 12;
-constexpr uint8_t MOTOR1_PIN_B = 13;
+constexpr uint8_t ENC0_PIN_A = 15;
+constexpr uint8_t ENC0_PIN_B = 16;
+constexpr uint8_t ENC1_PIN_A = 18;
+constexpr uint8_t ENC1_PIN_B = 17;
 
 // ---- PID 参数 ----
 
@@ -30,11 +30,16 @@ constexpr float PID_KI = 0.125f;           // 积分增益
 constexpr float PID_KD = 0.0f;             // 微分增益
 constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 
-// ---- 速度计算参数 ----
+// ---- 测试参数 ----
+
+constexpr uint32_t LOOP_DELAY_MS = 10; // 控制周期, 单位 ms
+constexpr float MS_TO_S = 1000.0f;     // mm/ms -> mm/s 换算系数
+
+// ---- 编码器标定参数 ----
+// 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
+// 单位: mm/ms, 等价于 m/s
 
 constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
-constexpr float MS_TO_S = 1000.0f;                 // mm/ms -> mm/s 换算系数
-constexpr uint32_t LOOP_DELAY_MS = 10;             // 控制周期, 单位 ms
 
 // ---- 目标速度 ----
 
@@ -107,8 +112,8 @@ void motor_speed_control() {
     // 普通局部变量: 每次调用重新计算的临时量
     uint64_t now = millis();
     uint64_t dt = now - last_update_time;
-    int32_t delta_ticks[2];  // 两次读取之间的计数器差值
-    float current_speeds[2]; // 当前两个电动机的速度, 单位 mm/s
+    int32_t delta_ticks[2] = {0, 0};              // 两次读取之间的计数器差值
+    float current_motor_speeds[2] = {0.0f, 0.0f}; // 当前两个电动机的速度, 单位 mm/s
 
     // 计算编码器差值
     delta_ticks[0] = static_cast<int32_t>(encoders[0].getTicks() - last_ticks[0]);
@@ -117,10 +122,10 @@ void motor_speed_control() {
     // 距离比时间获取速度: delta_ticks * 单脉冲距离 / 时间差
     // 原始单位为 mm/ms, 乘以 1000 转换为 mm/s, 方便 PID 计算与观察
     if (dt != 0) {
-        current_speeds[0] = static_cast<float>(delta_ticks[0] * DISTANCE_PER_TICK_MM) /
-                            static_cast<float>(dt) * MS_TO_S;
-        current_speeds[1] = static_cast<float>(delta_ticks[1] * DISTANCE_PER_TICK_MM) /
-                            static_cast<float>(dt) * MS_TO_S;
+        current_motor_speeds[0] = static_cast<float>(delta_ticks[0]) * DISTANCE_PER_TICK_MM /
+                                  static_cast<float>(dt) * MS_TO_S;
+        current_motor_speeds[1] = static_cast<float>(delta_ticks[1]) * DISTANCE_PER_TICK_MM /
+                                  static_cast<float>(dt) * MS_TO_S;
     }
 
     // 更新上一次状态
@@ -129,11 +134,15 @@ void motor_speed_control() {
     last_ticks[1] = encoders[1].getTicks();
 
     // 根据当前速度, 更新电机 0 和电机 1 的 PWM 输出
-    motor.updateMotorSpeed(0, pid_controller[0].update_pwm(current_speeds[0]));
-    motor.updateMotorSpeed(1, pid_controller[1].update_pwm(current_speeds[1]));
+    motor.updateMotorSpeed(0, pid_controller[0].update_pwm(current_motor_speeds[0]));
+    motor.updateMotorSpeed(1, pid_controller[1].update_pwm(current_motor_speeds[1]));
 
     // 输出数据
-    Serial.printf("speed1=%f mm/s, speed2=%f mm/s\n", current_speeds[0], current_speeds[1]);
+    Serial.printf(
+        "speed1=%f mm/s, speed2=%f mm/s\n",
+        current_motor_speeds[0],
+        current_motor_speeds[1]
+    );
 }
 
 } // namespace

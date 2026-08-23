@@ -4,6 +4,10 @@
 
 namespace {
 
+// ---- 串口参数 ----
+
+constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
+
 // ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
 constexpr uint8_t MOTOR0_PIN_A = 4;
@@ -18,11 +22,10 @@ constexpr uint8_t ENC0_PIN_B = 16;
 constexpr uint8_t ENC1_PIN_A = 18;
 constexpr uint8_t ENC1_PIN_B = 17;
 
-// ---- 串口与控制参数 ----
+// ---- 测试参数 ----
 
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-constexpr uint32_t LOOP_DELAY_MS = 10;   // 采样周期, 单位: ms
-constexpr int16_t MOTOR_SPEED = 70;      // 测试转速, 范围 [-100, 100]
+constexpr uint32_t LOOP_DELAY_MS = 10; // 采样周期, 单位: ms
+constexpr int16_t MOTOR_SPEED = 70;    // 测试转速, 范围 [-100, 100]
 
 // ---- 编码器标定参数 ----
 // 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差

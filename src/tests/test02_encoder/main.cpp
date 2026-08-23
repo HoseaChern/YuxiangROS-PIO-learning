@@ -3,6 +3,10 @@
 
 namespace {
 
+// ---- 串口参数 ----
+
+constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
+
 // ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
 constexpr uint8_t ENC0_PIN_A = 15;
@@ -10,10 +14,9 @@ constexpr uint8_t ENC0_PIN_B = 16;
 constexpr uint8_t ENC1_PIN_A = 18;
 constexpr uint8_t ENC1_PIN_B = 17;
 
-// ---- 串口与轮径标定参数 ----
+// ---- 测试参数 ----
 
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-constexpr uint32_t LOOP_DELAY_MS = 10;   // 采样间隔, 单位: ms
+constexpr uint32_t LOOP_DELAY_MS = 10; // 采样间隔, 单位: ms
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
 
