@@ -1,6 +1,8 @@
 #ifndef PIDCONTROLLER_H
 #define PIDCONTROLLER_H
 
+#include <cstdint>
+
 /**
  * @brief PID控制器
  * 
@@ -30,8 +32,8 @@ class PIDController {
     PIDController() = default;                   //默认构造函数
     PIDController(float kp, float ki, float kd); // 构造函数, 传入PID系数
 
-    float update_pwm(float current);               // 提供当前值, 返回控制输出值
-    void update_target(float target);              // 更新目标值
+    int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
+    void update_target(float target);  // 更新目标值
     void update_PID(float kp, float ki, float kd); // 更新PID系数
     void reset();                                  // 重置PID控制器
     void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]

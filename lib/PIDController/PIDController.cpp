@@ -1,6 +1,6 @@
 #include "PIDController.h"
 
-#include <Arduino.h>
+#include <cstdint>
 
 PIDController::PIDController(float kp, float ki, float kd) {
     reset();                // 初始化控制器
@@ -11,9 +11,9 @@ PIDController::PIDController(float kp, float ki, float kd) {
  * @brief 更新PID控制器, 核心算法实现
  * 
  * @param current 当前值
- * @return float 控制输出值
+ * @return int16_t PWM 输出值, 范围 ±output_limit_, 四舍五入取整
  */
-float PIDController::update_pwm(float current) {
+int16_t PIDController::update_pwm(float current) {
     // 计算误差及其变化率
     float error = target_ - current; // 计算误差
     d_error_ = error_last_ - error;  // 计算误差变化率
@@ -37,7 +37,10 @@ float PIDController::update_pwm(float current) {
         output = -output_limit_;
     }
 
-    return output;
+    // 四舍五入取整: 直接截断 (static_cast<int16_t>) 会让 99.6 -> 99, 低速时占空比系统性偏小;
+    // 四舍五入后 99.6 -> 100, 负数同样处理 (-99.6 -> -100)。输出已被 output_limit_
+    // 限幅为 ±output_limit_ (远小于 int16_t 范围), 此转换无溢出风险。
+    return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
 }
 
 void PIDController::update_target(float target) { target_ = target; }
