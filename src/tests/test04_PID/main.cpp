@@ -9,7 +9,7 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 电机引脚 (电机0: 4/15, 电机1: 7/6) ----
+// ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
 constexpr uint8_t MOTOR0_PIN_A = 4;
 constexpr uint8_t MOTOR0_PIN_B = 5;
