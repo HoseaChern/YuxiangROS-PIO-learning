@@ -21,21 +21,20 @@ class PIDController {
     float ki_;           // 积分系数
     float kd_;           // 微分系数
 
-    float error_sum_;              // 误差累积和
-    float d_error_;                // 误差变化率
-    float error_last_;             // 上次误差
-    float error_pre_last_;         // 上上次误差
-    float intergral_sup_ = 2500.0; // 积分值上界
+    float error_sum_;               // 误差累积和
+    float d_error_;                 // 误差变化率
+    float error_last_;              // 上次误差
+    float intergral_sup_ = 2500.0f; // 积分值上界
 
   public:
     PIDController() = default;                   //默认构造函数
     PIDController(float kp, float ki, float kd); // 构造函数, 传入PID系数
 
-    float update(float current);                     // 提供当前值, 返回控制输出值
-    void update_target(float target);                // 更新目标值
-    void update_PID(float kp, float ki, float kd);   // 更新PID系数
-    void reset();                                    // 重置PID控制器
-    void output_limit(float limit);                  // 设置输出限幅, 对称限制在 [-limit, limit]
+    float update_pwm(float current);               // 提供当前值, 返回控制输出值
+    void update_target(float target);              // 更新目标值
+    void update_PID(float kp, float ki, float kd); // 更新PID系数
+    void reset();                                  // 重置PID控制器
+    void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]
 };
 
 #endif // PIDCONTROLLER_H

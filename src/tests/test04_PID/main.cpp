@@ -129,8 +129,8 @@ void motor_speed_control() {
     last_ticks[1] = encoders[1].getTicks();
 
     // 根据当前速度, 更新电机 0 和电机 1 的 PWM 输出
-    motor.updateMotorSpeed(0, pid_controller[0].update(current_speeds[0]));
-    motor.updateMotorSpeed(1, pid_controller[1].update(current_speeds[1]));
+    motor.updateMotorSpeed(0, pid_controller[0].update_pwm(current_speeds[0]));
+    motor.updateMotorSpeed(1, pid_controller[1].update_pwm(current_speeds[1]));
 
     // 输出数据
     Serial.printf("speed1=%f mm/s, speed2=%f mm/s\n", current_speeds[0], current_speeds[1]);

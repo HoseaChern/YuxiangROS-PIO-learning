@@ -228,8 +228,8 @@ void micro_ros_task(void* parameter) {
 void update_and_control() {
     kinematics.update_motor_speed(millis(), encoders[0].getTicks(), encoders[1].getTicks());
 
-    motor.updateMotorSpeed(0, pid_controller[0].update(kinematics.get_motor_speed(0)));
-    motor.updateMotorSpeed(1, pid_controller[1].update(kinematics.get_motor_speed(1)));
+    motor.updateMotorSpeed(0, pid_controller[0].update_pwm(kinematics.get_motor_speed(0)));
+    motor.updateMotorSpeed(1, pid_controller[1].update_pwm(kinematics.get_motor_speed(1)));
 }
 
 } // namespace

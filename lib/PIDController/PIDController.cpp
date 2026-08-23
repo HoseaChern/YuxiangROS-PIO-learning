@@ -13,7 +13,7 @@ PIDController::PIDController(float kp, float ki, float kd) {
  * @param current 当前值
  * @return float 控制输出值
  */
-float PIDController::update(float current) {
+float PIDController::update_pwm(float current) {
     // 计算误差及其变化率
     float error = target_ - current; // 计算误差
     d_error_ = error_last_ - error;  // 计算误差变化率
@@ -50,17 +50,14 @@ void PIDController::update_PID(float kp, float ki, float kd) {
 }
 
 void PIDController::reset() {
-    target_ = 0.0;
-    output_limit_ = 0.0;
-    kp_ = 0.0;
-    ki_ = 0.0;
-    kd_ = 0.0;
-    error_last_ = 0.0;
-    error_pre_last_ = 0.0;
-    error_sum_ = 0.0;
-    d_error_ = 0.0;
+    target_ = 0.0f;
+    output_limit_ = 0.0f;
+    kp_ = 0.0f;
+    ki_ = 0.0f;
+    kd_ = 0.0f;
+    error_last_ = 0.0f;
+    error_sum_ = 0.0f;
+    d_error_ = 0.0f;
 }
 
-void PIDController::output_limit(float limit) {
-    output_limit_ = limit;
-}
+void PIDController::output_limit(float limit) { output_limit_ = limit; }
