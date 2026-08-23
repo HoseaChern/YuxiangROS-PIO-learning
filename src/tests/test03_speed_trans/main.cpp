@@ -4,31 +4,31 @@
 
 namespace {
 
-// ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
+// ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 10;
-constexpr uint8_t MOTOR0_PIN_B = 11;
-constexpr uint8_t MOTOR1_PIN_A = 12;
-constexpr uint8_t MOTOR1_PIN_B = 13;
+constexpr uint8_t MOTOR0_PIN_A = 4;
+constexpr uint8_t MOTOR0_PIN_B = 5;
+constexpr uint8_t MOTOR1_PIN_A = 7;
+constexpr uint8_t MOTOR1_PIN_B = 6;
 
-// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
+// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr uint8_t ENC0_PIN_A = 4;
-constexpr uint8_t ENC0_PIN_B = 5;
-constexpr uint8_t ENC1_PIN_A = 14;
-constexpr uint8_t ENC1_PIN_B = 15;
+constexpr uint8_t ENC0_PIN_A = 15;
+constexpr uint8_t ENC0_PIN_B = 16;
+constexpr uint8_t ENC1_PIN_A = 18;
+constexpr uint8_t ENC1_PIN_B = 17;
 
 // ---- 串口与控制参数 ----
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 constexpr uint32_t LOOP_DELAY_MS = 10;   // 采样周期, 单位: ms
-constexpr int MOTOR_SPEED = 70;          // 测试转速, 范围 [-100, 100]
+constexpr int16_t MOTOR_SPEED = 70;      // 测试转速, 范围 [-100, 100]
 
 // ---- 编码器标定参数 ----
 // 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
 // 单位: mm/ms, 等价于 m/s
 
-constexpr float DISTANCE_PER_TICK_MM = 0.1427138f;
+constexpr float DISTANCE_PER_TICK_MM = 0.14307702f;
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
 
@@ -73,8 +73,8 @@ void loop() {
     // 普通局部变量: 每次循环重新计算的临时量
     uint64_t now = millis();
     uint64_t dt = now - last_update_time;
-    int32_t delta_ticks[2];  // 两次读取之间的计数器差值
-    float current_speeds[2]; // 当前两个电动机的速度
+    int32_t delta_ticks[2] = {0, 0};              // 两次读取之间的计数器差值
+    float current_motor_speeds[2] = {0.0f, 0.0f}; // 当前两个电动机的速度
 
     // 计算编码器差值
     delta_ticks[0] = static_cast<int32_t>(encoders[0].getTicks() - last_ticks[0]);
@@ -82,10 +82,10 @@ void loop() {
 
     // 距离比时间获取速度, 单位 mm/ms, 相当于 m/s
     if (dt != 0) {
-        current_speeds[0] =
-            static_cast<float>(delta_ticks[0] * DISTANCE_PER_TICK_MM) / static_cast<float>(dt);
-        current_speeds[1] =
-            static_cast<float>(delta_ticks[1] * DISTANCE_PER_TICK_MM) / static_cast<float>(dt);
+        current_motor_speeds[0] =
+            static_cast<float>(delta_ticks[0]) * DISTANCE_PER_TICK_MM / static_cast<float>(dt);
+        current_motor_speeds[1] =
+            static_cast<float>(delta_ticks[1]) * DISTANCE_PER_TICK_MM / static_cast<float>(dt);
     }
 
     // 更新数据
@@ -94,5 +94,5 @@ void loop() {
     last_ticks[1] = encoders[1].getTicks();
 
     // 输出数据
-    Serial.printf("speed1=%fm/s,speed2=%fm/s\n", current_speeds[0], current_speeds[1]);
+    Serial.printf("speed1=%fm/s,speed2=%fm/s\n", current_motor_speeds[0], current_motor_speeds[1]);
 }

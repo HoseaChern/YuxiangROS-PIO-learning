@@ -3,12 +3,12 @@
 
 namespace {
 
-// ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
+// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr uint8_t ENC0_PIN_A = 4;
-constexpr uint8_t ENC0_PIN_B = 5;
-constexpr uint8_t ENC1_PIN_A = 14;
-constexpr uint8_t ENC1_PIN_B = 15;
+constexpr uint8_t ENC0_PIN_A = 15;
+constexpr uint8_t ENC0_PIN_B = 16;
+constexpr uint8_t ENC1_PIN_A = 18;
+constexpr uint8_t ENC1_PIN_B = 17;
 
 // ---- 串口与轮径标定参数 ----
 
@@ -52,7 +52,7 @@ void loop() {
  * 4. 根据公式计算即可: l = N * PI * D/ tick, PI 取较精确值即可
  * 
  * 最新测量值:
- * N = 10, tick = 14969, D = 68 mm
+ * N = 10, tick = 14931, D = 68 mm
  * 得到:
- * l = 0.1427138 mm / tick
+ * l = 0.14307702 mm / tick
  */
