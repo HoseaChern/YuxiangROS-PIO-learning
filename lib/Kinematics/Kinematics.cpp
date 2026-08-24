@@ -82,7 +82,7 @@ void Kinematics::update_motor_speed(uint64_t now, const int32_t ticks[2]) {
 
 float Kinematics::get_motor_speed(uint8_t motor_id) { return current_motor_speeds_[motor_id]; }
 
-void Kinematics::update_odom(uint16_t dt) {
+void Kinematics::update_odom(uint64_t dt) {
     // 单位换算, ms -> s
     float dt_s = static_cast<float>(dt) / MS_TO_S;
 

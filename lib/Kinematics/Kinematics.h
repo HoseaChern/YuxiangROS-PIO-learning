@@ -61,7 +61,7 @@ class Kinematics {
     void update_motor_speed(uint64_t now, const int32_t ticks[2]);
     float get_motor_speed(uint8_t motor_id); // 获取电机速度
 
-    void update_odom(uint16_t dt);                                // 更新里程计数据
+    void update_odom(uint64_t dt);                                // 更新里程计数据
     odom_t& get_odom();                                           // 获取里程计数据
     static void TransAngleInPI(float& angle); // 将角度归一化到[-PI, PI]
 };
