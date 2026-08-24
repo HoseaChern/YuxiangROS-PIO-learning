@@ -18,8 +18,11 @@ void Kinematics::set_wheel_distance(float wheel_distance) { wheel_distance_ = wh
  * @note 仅用于里程计计算
  */
 void Kinematics::kinematics_forward(const float motor_speeds[2], float body_velocities[2]) {
-    body_velocities[0] = (motor_speeds[0] + motor_speeds[1]) / 2.0f;            // 线速度
-    body_velocities[1] = (motor_speeds[1] - motor_speeds[0]) / wheel_distance_; // 角速度
+    body_velocities[0] = (motor_speeds[0] + motor_speeds[1]) / 2.0f; // 线速度
+    // 防御: 轮间距未设置(<=0)时角速度无意义, 输出 0 避免除零得 inf
+    body_velocities[1] = (wheel_distance_ > 0.0f)
+                             ? (motor_speeds[1] - motor_speeds[0]) / wheel_distance_
+                             : 0.0f; // 角速度
 }
 
 /**
