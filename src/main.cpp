@@ -124,7 +124,10 @@ void setup() {
     const float target_linear_velocity = 50.0; // 目标线速度, 单位 mm/s
     const float target_angular_velocity = 0.1; // 目标角速度, 单位 rad/s
 
-    const float body_velocities[2] = {target_linear_velocity, target_angular_velocity}; // 车体速度: [0]=线速度 mm/s, [1]=角速度 rad/s
+    const float body_velocities[2] = {
+        target_linear_velocity,
+        target_angular_velocity
+    }; // 车体速度: [0]=线速度 mm/s, [1]=角速度 rad/s
     float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
@@ -169,8 +172,8 @@ void twist_callback(const void* msgin) {
 
     // 计算运动学逆解: 车体速度 -> 电机目标转速
     const float body_velocities[2] = {
-        twist_msg->linear.x * M_TO_MM, // [0]=线速度, 单位换算 m/s -> mm/s
-        twist_msg->angular.z           // [1]=角速度, 单位 rad/s
+        static_cast<float>(twist_msg->linear.x * M_TO_MM), // [0]=线速度, 单位换算 m/s -> mm/s
+        static_cast<float>(twist_msg->angular.z)           // [1]=角速度, 单位 rad/s
     };
     float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
@@ -299,7 +302,10 @@ void micro_ros_task(void* parameter) {
  * 再经 PID 控制器输出 PWM 值更新电机。
  */
 void update_and_control() {
-    const int32_t ticks[2] = {encoders[0].getTicks(), encoders[1].getTicks()}; // 编码器 tick: [0]=左, [1]=右
+    const int32_t ticks[2] = {
+        encoders[0].getTicks(),
+        encoders[1].getTicks()
+    }; // 编码器 tick: [0]=左, [1]=右
     kinematics.update_motor_speed(millis(), ticks);
 
     motor.updateMotorSpeed(0, pid_controller[0].update_pwm(kinematics.get_motor_speed(0)));
