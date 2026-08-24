@@ -1,7 +1,5 @@
 #include "PIDController.h"
 
-#include <cstdint>
-
 PIDController::PIDController(float kp, float ki, float kd) {
     reset();                // 初始化控制器
     update_PID(kp, ki, kd); // 更新PID参数
