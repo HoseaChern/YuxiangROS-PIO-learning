@@ -31,19 +31,19 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// 编码器引脚 (编码器0: 4/5, 编码器1: 14/15)
+// 编码器引脚 (编码器0: 15/16, 编码器1: 18/17)
 
-constexpr uint8_t ENC_LEFT_PIN_A = 4;
-constexpr uint8_t ENC_LEFT_PIN_B = 5;
-constexpr uint8_t ENC_RIGHT_PIN_A = 14;
-constexpr uint8_t ENC_RIGHT_PIN_B = 15;
+constexpr uint8_t ENC_LEFT_PIN_A = 15;
+constexpr uint8_t ENC_LEFT_PIN_B = 16;
+constexpr uint8_t ENC_RIGHT_PIN_A = 18;
+constexpr uint8_t ENC_RIGHT_PIN_B = 17;
 
-// 电机引脚 (电机0: 10/11, 电机1: 12/13)
+// 电机引脚 (电机0: 4/5, 电机1: 7/6)
 
-constexpr uint8_t MOTOR_LEFT_PIN_A = 10;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 11;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 12;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 13;
+constexpr uint8_t MOTOR_LEFT_PIN_A = 4;
+constexpr uint8_t MOTOR_LEFT_PIN_B = 5;
+constexpr uint8_t MOTOR_RIGHT_PIN_A = 7;
+constexpr uint8_t MOTOR_RIGHT_PIN_B = 6;
 
 // PID 参数
 
