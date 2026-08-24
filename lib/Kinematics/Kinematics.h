@@ -59,7 +59,7 @@ class Kinematics {
     // 更新电机速度和编码器数据
     // ticks: [0]=左编码器, [1]=右编码器
     void update_motor_speed(uint64_t now, const int32_t ticks[2]);
-    float get_motor_speed(uint8_t motor_id); // 获取电机速度
+    float get_motor_speed(uint8_t motor_id) const; // 获取电机速度
 
     void update_odom(uint64_t dt);             // 更新里程计数据
     odom_t& get_odom();                        // 获取里程计数据 (可写)
