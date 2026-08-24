@@ -2,6 +2,9 @@
 
 #include <cmath>
 
+// C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
+constexpr float PIDController::INTEGRAL_SUP_LIMIT;
+
 // 构造函数: 成员已类内默认初始化, 初始化列表仅覆盖 PID 系数, 避免双重 reset
 PIDController::PIDController(float kp, float ki, float kd)
     : kp_(kp), ki_(ki), kd_(kd) {}
