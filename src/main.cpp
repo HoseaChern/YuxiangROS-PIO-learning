@@ -1,5 +1,5 @@
 /**
- * @brief also the test08_micro_ros_platformio
+ * @brief 小车运动控制主程序: micro-ROS 订阅 /cmd_vel, 运动学逆解 + PID 控制, 发布 /odom 里程计
  */
 
 #include <Arduino.h>
@@ -89,7 +89,13 @@ constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, �
 
 // ---- 订阅参数 ----
 
-constexpr uint8_t EXECUTOR_HANDLES = 2; // 执行器句柄数(速度订阅+里程计定时器)
+constexpr uint8_t EXECUTOR_HANDLES = 2;                 // 执行器句柄数(速度订阅+里程计定时器)
+constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";            // 速度指令话题名
+constexpr char NODE_NAME[] = "fishbot_motion_control";  // 节点名
+
+// ---- 发布参数 ----
+
+constexpr char ODOM_TOPIC[] = "/odom"; // 里程计话题名
 
 // ---- 可变全局状态 (跨 setup/loop/micro_ros_task/twist_callback 共享) ----
 
@@ -112,6 +118,9 @@ void update_and_control();
 
 void setup() {
     Serial.begin(SERIAL_BAUD);
+    while (!Serial) {
+        ;
+    }
 
     // 初始化编码器
     encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);     // 编码器0
@@ -121,29 +130,29 @@ void setup() {
     motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);    // 电动机0
     motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B); // 电动机1
 
-    // 初始化PID控制器
+    // 初始化 PID 控制器参数
     pid_controller[MOTOR_LEFT].update_pid(PID_KP, PID_KI, PID_KD);
     pid_controller[MOTOR_RIGHT].update_pid(PID_KP, PID_KI, PID_KD);
     pid_controller[MOTOR_LEFT].output_limit(PID_OUTPUT_LIMIT);  // 对称输出限幅 ±PID_OUTPUT_LIMIT
     pid_controller[MOTOR_RIGHT].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
 
-    // 初始化轮间距和电机参数
+    // 初始化轮子间距和电动机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
     kinematics.set_motor_param(DISTANCE_PER_TICK_MM); // 标定量标量化: 两电机共用
 
-    // 运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
-    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 test05/06/07)
+    // 默认目标速度, 避免订阅消息到达前电机无目标
+    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化
     // 车体速度: [VEL_LINEAR]=线速度 mm/s, [VEL_ANGULAR]=角速度 rad/s
     const float body_velocities[2] = {TARGET_LINEAR_SPEED_MM_S, TARGET_ANGULAR_SPEED_RAD_S};
     // 电机转速: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右, 单位 mm/s, 仅用于本次逆解计算
     float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
-    // PID更新目标轮速
+    // PID 初始化目标轮速
     pid_controller[MOTOR_LEFT].update_target(motor_speeds[MOTOR_LEFT]);
     pid_controller[MOTOR_RIGHT].update_target(motor_speeds[MOTOR_RIGHT]);
 
-    // 创建任务运行
+    // 创建任务运行 micro-ROS
     // 参数依次为: 任务函数, 任务名称, 任务堆栈字节数, 传递给任务函数的参数, 任务优先级, 任务句柄
     xTaskCreate(micro_ros_task, "micro_ros", MICRO_ROS_STACK_SIZE, NULL, MICRO_ROS_TASK_PRIO, NULL);
 }
@@ -189,7 +198,7 @@ void twist_callback(const void* msg_in) {
     float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
-    // PID更新目标轮速
+    // PID 更新目标轮速
     pid_controller[MOTOR_LEFT].update_target(motor_speeds[MOTOR_LEFT]);
     pid_controller[MOTOR_RIGHT].update_target(motor_speeds[MOTOR_RIGHT]);
 }
@@ -207,7 +216,7 @@ void odom_callback(rcl_timer_t* timer, int64_t last_call_time) {
     int64_t stamp = rmw_uros_epoch_millis(); // 获取当前时间
 
     pub_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000);                // 秒部分
-    pub_msg.header.stamp.nanosec = static_cast<uint32_t>(stamp % 1000) * S_TO_NS; // 纳秒部分
+    pub_msg.header.stamp.nanosec = static_cast<uint32_t>(stamp % 1000) * static_cast<uint32_t>(S_TO_NS); // 纳秒部分
 
     // 设置里程计消息
     pub_msg.pose.pose.position.x = odom.x;
@@ -260,8 +269,8 @@ void micro_ros_task(void* parameter) {
     // 3. 初始化 support
     rclc_support_init(&support, 0, NULL, &allocator);
 
-    // 4.初始化ROS节点 fishbot_motion_control
-    rclc_node_init_default(&node, "fishbot_motion_control", "", &support);
+    // 4. 初始化 ROS 节点
+    rclc_node_init_default(&node, NODE_NAME, "", &support);
 
     // 5. 初始化执行器
     unsigned int num_handles = EXECUTOR_HANDLES; // 订阅事件和定时器事件的句柄数
@@ -274,7 +283,7 @@ void micro_ros_task(void* parameter) {
         &subscriber,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-        "/cmd_vel"
+        CMD_VEL_TOPIC
     );
     // 参数依次为: 执行器指针, 订阅者指针, 订阅消息指针, 订阅回调函数指针, 调用类型宏
     rclc_executor_add_subscription(&executor, &subscriber, &sub_msg, &twist_callback, ON_NEW_DATA);
@@ -287,10 +296,10 @@ void micro_ros_task(void* parameter) {
         &publisher,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
-        "/odom"
+        ODOM_TOPIC
     );
 
-    // 8.时间同步
+    // 8. 时间同步
     while (!rmw_uros_epoch_synchronized()) {
         // 如果没有同步, 则尝试进行时间同步
         rmw_uros_sync_session(SYNC_ATTEMPT_MS);
