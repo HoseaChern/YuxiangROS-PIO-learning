@@ -4,8 +4,8 @@
 constexpr float Kinematics::MS_TO_S;
 constexpr float Kinematics::PI_F;
 
-void Kinematics::set_motor_param(uint8_t motor_id, float per_pulse_distance) {
-    motor_params_[motor_id].per_pulse_distance = per_pulse_distance;
+void Kinematics::set_motor_param(float distance_per_tick_mm) {
+    distance_per_tick_mm_ = distance_per_tick_mm;
 }
 
 void Kinematics::set_wheel_distance(float wheel_distance) { wheel_distance_ = wheel_distance; }
@@ -50,38 +50,46 @@ void Kinematics::kinematics_inverse(
  * @param right_tick 右轮编码器脉冲数
  */
 void Kinematics::update_motor_speed(uint64_t now, int32_t left_tick, int32_t right_tick) {
+    // 静态局部变量: 采样基线跨多次调用保持
+    static uint64_t last_update_time = 0;  // 上一次更新时间
+    static int64_t last_ticks[2] = {0, 0}; // 上一次读取的计数器数值
+    static bool is_first_run = true;       // 首次进入标志
 
-    uint64_t dt = now - last_update_time_; // 计算时间差
+    if (is_first_run) {
+        // 初始化采样基线, 避免首次控制周期时间差过大
+        last_update_time = now;
+        last_ticks[0] = left_tick;
+        last_ticks[1] = right_tick;
+        is_first_run = false;
+    }
+
+    // 普通局部变量: 每次循环重新计算的临时量
+    uint64_t dt = now - last_update_time; // 计算时间差
 
     // 计算电机编码器读数变化量
-    int32_t delta_left_tick = static_cast<int32_t>(left_tick - motor_params_[0].last_encoder_tick);
-    int32_t delta_right_tick =
-        static_cast<int32_t>(right_tick - motor_params_[1].last_encoder_tick);
+    int32_t delta_left_tick = static_cast<int32_t>(left_tick - last_ticks[0]);
+    int32_t delta_right_tick = static_cast<int32_t>(right_tick - last_ticks[1]);
 
     // 距离比时间获取速度: delta_ticks * 单脉冲距离 / 时间差
     // 原始单位为 mm/ms, 乘以 1000 转换为 mm/s, 方便 PID 计算与观察
     if (dt != 0) {
-        motor_params_[0].motor_speed = static_cast<float>(delta_left_tick) *
-                                       motor_params_[0].per_pulse_distance /
-                                       static_cast<float>(dt) * MS_TO_S;
-        motor_params_[1].motor_speed = static_cast<float>(delta_right_tick) *
-                                       motor_params_[1].per_pulse_distance /
-                                       static_cast<float>(dt) * MS_TO_S;
+        current_motor_speeds_[0] = static_cast<float>(delta_left_tick) * distance_per_tick_mm_ /
+                                   static_cast<float>(dt) * MS_TO_S;
+        current_motor_speeds_[1] = static_cast<float>(delta_right_tick) * distance_per_tick_mm_ /
+                                   static_cast<float>(dt) * MS_TO_S;
     }
 
     // 更新上一次更新时间为当前时间
-    last_update_time_ = now;
+    last_update_time = now;
     // 更新上一次编码器读数为当前编码器读数
-    motor_params_[0].last_encoder_tick = left_tick;
-    motor_params_[1].last_encoder_tick = right_tick;
+    last_ticks[0] = left_tick;
+    last_ticks[1] = right_tick;
 
     // 更新里程计
     update_odom(dt);
 }
 
-int16_t Kinematics::get_motor_speed(uint8_t motor_id) {
-    return motor_params_[motor_id].motor_speed;
-}
+float Kinematics::get_motor_speed(uint8_t motor_id) { return current_motor_speeds_[motor_id]; }
 
 void Kinematics::update_odom(uint16_t dt) {
     // 单位换算, ms -> s
@@ -89,8 +97,8 @@ void Kinematics::update_odom(uint16_t dt) {
 
     // 运动学正解
     this->kinematics_forward(
-        motor_params_[0].motor_speed,
-        motor_params_[1].motor_speed,
+        current_motor_speeds_[0],
+        current_motor_speeds_[1],
         odom_.linear_velocity,
         odom_.angular_velocity
     );
