@@ -128,8 +128,9 @@ void motor_speed_control() {
                                   static_cast<float>(dt) * MS_TO_S;
     }
 
-    // 更新上一次状态
+    // 更新上一次更新时间为当前时间
     last_update_time = now;
+    // 更新上一次编码器读数为当前编码器读数
     last_ticks[0] = encoders[0].getTicks();
     last_ticks[1] = encoders[1].getTicks();
 

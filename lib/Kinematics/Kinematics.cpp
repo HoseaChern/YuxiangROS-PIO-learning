@@ -43,33 +43,37 @@ void Kinematics::kinematics_inverse(
 /**
  * @brief 更新电机速度和编码器数据
  * 
- * @param current_time 当前时间
+ * @param now 当前时间
  * @param left_tick 左轮编码器脉冲数
  * @param right_tick 右轮编码器脉冲数
  */
-void Kinematics::update_motor_speed(uint64_t current_time, int32_t left_tick, int32_t right_tick) {
-    // 计算时间差
-    uint64_t dt = current_time - last_update_time_;
-    // 更新上一次更新时间为当前时间
-    last_update_time_ = current_time;
+void Kinematics::update_motor_speed(uint64_t now, int32_t left_tick, int32_t right_tick) {
+
+    uint64_t dt = now - last_update_time_; // 计算时间差
 
     // 计算电机编码器读数变化量
-    int32_t delta_left_tick = left_tick - motor_params_[0].last_encoder_tick;
-    int32_t delta_right_tick = right_tick - motor_params_[1].last_encoder_tick;
+    int32_t delta_left_tick = static_cast<int32_t>(left_tick - motor_params_[0].last_encoder_tick);
+    int32_t delta_right_tick =
+        static_cast<int32_t>(right_tick - motor_params_[1].last_encoder_tick);
+
+    // 距离比时间获取速度: delta_ticks * 单脉冲距离 / 时间差
+    // 原始单位为 mm/ms, 乘以 1000 转换为 mm/s, 方便 PID 计算与观察
+    if (dt != 0) {
+        motor_params_[0].motor_speed = static_cast<float>(delta_left_tick) *
+                                       motor_params_[0].per_pulse_distance /
+                                       static_cast<float>(dt) * MS_TO_S;
+        motor_params_[1].motor_speed = static_cast<float>(delta_right_tick) *
+                                       motor_params_[1].per_pulse_distance /
+                                       static_cast<float>(dt) * MS_TO_S;
+    }
+
+    // 更新上一次更新时间为当前时间
+    last_update_time_ = now;
     // 更新上一次编码器读数为当前编码器读数
     motor_params_[0].last_encoder_tick = left_tick;
     motor_params_[1].last_encoder_tick = right_tick;
 
-    // 轮子速度计算, mm/ms = m/s
-    motor_params_[0].motor_speed =
-        static_cast<float>(delta_left_tick * motor_params_[0].per_pulse_distance) / dt;
-    motor_params_[1].motor_speed =
-        static_cast<float>(delta_right_tick * motor_params_[1].per_pulse_distance) / dt;
-    // 单位换算, mm/ms -> mm/s
-    motor_params_[0].motor_speed *= MS_TO_S;
-    motor_params_[1].motor_speed *= MS_TO_S;
-
-    //更新里程计
+    // 更新里程计
     update_odom(dt);
 }
 

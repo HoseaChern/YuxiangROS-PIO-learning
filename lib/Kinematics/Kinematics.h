@@ -6,7 +6,7 @@
 // 电机参数
 using motor_param_t = struct motor_param_t {
     float per_pulse_distance;  // 单个脉冲对应轮子前近距离, 单位 mm
-    int16_t motor_speed;       // 电机速度, 单位 mm/ms = m/s
+    float motor_speed;         // 电机速度, 单位 mm/s
     int64_t last_encoder_tick; // 上次编码器计数值
 };
 
@@ -62,7 +62,7 @@ class Kinematics {
     ); // 运动学逆解
 
     // 更新电机速度和编码器数据
-    void update_motor_speed(uint64_t current_time, int32_t left_tick, int32_t right_tick);
+    void update_motor_speed(uint64_t now, int32_t left_tick, int32_t right_tick);
     int16_t get_motor_speed(uint8_t motor_id); // 获取电机速度
 
     void update_odom(uint16_t dt);                                // 更新里程计数据
