@@ -1,7 +1,8 @@
 #ifndef KINEMATICS_H
 #define KINEMATICS_H
 
-#include <Arduino.h>
+#include <cmath>
+#include <cstdint>
 
 // 电机参数
 using motor_param_t = struct motor_param_t {
@@ -38,7 +39,8 @@ using odom_t = struct odom_t {
 class Kinematics {
   private:
     // 单位换算常量
-    static constexpr float MS_TO_S = 1000.0f; // 单位换算系数 (1 s = 1000 ms)
+    static constexpr float MS_TO_S = 1000.0f;  // 单位换算系数 (1 s = 1000 ms)
+    static constexpr float PI_F = 3.14159265f; // 单精度 PI 常量, ESP32单精度优先
 
     motor_param_t motor_params_[2]; // 存储电机参数
     uint64_t last_update_time_;     // 上次更新数据的时间, 单位 ms

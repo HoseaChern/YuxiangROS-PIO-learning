@@ -1,6 +1,8 @@
 #include "Kinematics.h"
 
-constexpr float Kinematics::MS_TO_S; // C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
+// C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
+constexpr float Kinematics::MS_TO_S;
+constexpr float Kinematics::PI_F;
 
 void Kinematics::set_motor_param(uint8_t motor_id, float per_pulse_distance) {
     motor_params_[motor_id].per_pulse_distance = per_pulse_distance;
@@ -20,7 +22,7 @@ void Kinematics::kinematics_forward(
     float left_speed, float right_speed, float& output_linear_velocity,
     float& output_angular_velocity
 ) {
-    output_linear_velocity = (left_speed + right_speed) / 2.0;
+    output_linear_velocity = (left_speed + right_speed) / 2.0f;
     output_angular_velocity = (right_speed - left_speed) / wheel_distance_;
 }
 
@@ -36,8 +38,8 @@ void Kinematics::kinematics_inverse(
     float linear_velocity, float angular_velocity, float& output_left_speed,
     float& output_right_speed
 ) {
-    output_left_speed = linear_velocity - angular_velocity * wheel_distance_ / 2.0;
-    output_right_speed = linear_velocity + angular_velocity * wheel_distance_ / 2.0;
+    output_left_speed = linear_velocity - angular_velocity * wheel_distance_ / 2.0f;
+    output_right_speed = linear_velocity + angular_velocity * wheel_distance_ / 2.0f;
 }
 
 /**
@@ -113,10 +115,10 @@ odom_t& Kinematics::get_odom() { return odom_; }
  * @param[out] output_angle 输出角度
  */
 void Kinematics::TransAngleInPI(float angle, float& output_angle) {
-    if (angle > PI) {
-        output_angle -= 2 * PI;
+    if (angle > PI_F) {
+        output_angle -= 2.0f * PI_F;
     }
-    if (angle < -PI) {
-        output_angle += 2 * PI;
+    if (angle < -PI_F) {
+        output_angle += 2.0f * PI_F;
     }
 }
