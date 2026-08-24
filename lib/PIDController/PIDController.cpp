@@ -6,8 +6,7 @@
 constexpr float PIDController::INTEGRAL_SUP_LIMIT;
 
 // 构造函数: 成员已类内默认初始化, 初始化列表仅覆盖 PID 系数, 避免双重 reset
-PIDController::PIDController(float kp, float ki, float kd)
-    : kp_(kp), ki_(ki), kd_(kd) {}
+PIDController::PIDController(float kp, float ki, float kd) : kp_(kp), ki_(ki), kd_(kd) {}
 
 /**
  * @brief 更新PID控制器, 核心算法实现
