@@ -13,34 +13,38 @@ void Kinematics::set_wheel_distance(float wheel_distance) { wheel_distance_ = wh
 /**
  * @brief 运动学正解: 电机转速 -> 车体速度
  * 
- * @param motor_speeds 电机转速, [0]=左电机, [1]=右电机, 单位 mm/s
- * @param[out] body_velocities 车体速度, [0]=线速度, 单位 mm/s; [1]=角速度, 单位 rad/s
+ * @param motor_speeds 电机转速, [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
+ * @param[out] body_velocities 车体速度, [VEL_LINEAR]=线速度, 单位 mm/s; [VEL_ANGULAR]=角速度, 单位 rad/s
  * @note 仅用于里程计计算
  */
 void Kinematics::kinematics_forward(const float motor_speeds[2], float body_velocities[2]) {
-    body_velocities[0] = (motor_speeds[0] + motor_speeds[1]) / 2.0f; // 线速度
+    body_velocities[VEL_LINEAR] =
+        (motor_speeds[MOTOR_LEFT] + motor_speeds[MOTOR_RIGHT]) / 2.0f; // 线速度
     // 防御: 轮间距未设置(<=0)时角速度无意义, 输出 0 避免除零得 inf
-    body_velocities[1] = (wheel_distance_ > 0.0f)
-                             ? (motor_speeds[1] - motor_speeds[0]) / wheel_distance_
-                             : 0.0f; // 角速度
+    body_velocities[VEL_ANGULAR] =
+        (wheel_distance_ > 0.0f)
+            ? (motor_speeds[MOTOR_RIGHT] - motor_speeds[MOTOR_LEFT]) / wheel_distance_
+            : 0.0f; // 角速度
 }
 
 /**
  * @brief 运动学逆解: 车体速度 -> 电机目标转速
  * 
- * @param body_velocities 车体速度, [0]=目标线速度, 单位 mm/s; [1]=目标角速度, 单位 rad/s
- * @param[out] motor_speeds 电机目标转速, [0]=左电机, [1]=右电机, 单位 mm/s
+ * @param body_velocities 车体速度, [VEL_LINEAR]=目标线速度, 单位 mm/s; [VEL_ANGULAR]=目标角速度, 单位 rad/s
+ * @param[out] motor_speeds 电机目标转速, [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
  */
 void Kinematics::kinematics_inverse(const float body_velocities[2], float motor_speeds[2]) {
-    motor_speeds[0] = body_velocities[0] - body_velocities[1] * wheel_distance_ / 2.0f; // 左轮
-    motor_speeds[1] = body_velocities[0] + body_velocities[1] * wheel_distance_ / 2.0f; // 右轮
+    motor_speeds[MOTOR_LEFT] =
+        body_velocities[VEL_LINEAR] - body_velocities[VEL_ANGULAR] * wheel_distance_ / 2.0f; // 左轮
+    motor_speeds[MOTOR_RIGHT] =
+        body_velocities[VEL_LINEAR] + body_velocities[VEL_ANGULAR] * wheel_distance_ / 2.0f; // 右轮
 }
 
 /**
  * @brief 更新电机速度与里程计数据
  * 
  * @param now 当前时间, 单位 ms
- * @param ticks 编码器读数, [0]=左编码器, [1]=右编码器
+ * @param ticks 编码器读数, [MOTOR_LEFT]=左编码器, [MOTOR_RIGHT]=右编码器
  */
 void Kinematics::update_motor_speed(uint64_t now, const int32_t ticks[2]) {
     // 静态局部变量: 采样基线跨多次调用保持
@@ -51,8 +55,8 @@ void Kinematics::update_motor_speed(uint64_t now, const int32_t ticks[2]) {
     if (is_first_run) {
         // 初始化采样基线, 避免首次控制周期时间差过大
         last_update_time = now;
-        last_ticks[0] = ticks[0];
-        last_ticks[1] = ticks[1];
+        last_ticks[MOTOR_LEFT] = ticks[MOTOR_LEFT];
+        last_ticks[MOTOR_RIGHT] = ticks[MOTOR_RIGHT];
         is_first_run = false;
     }
 
@@ -61,29 +65,31 @@ void Kinematics::update_motor_speed(uint64_t now, const int32_t ticks[2]) {
 
     // 计算电机编码器读数变化量
     int32_t delta_ticks[2] = {0, 0}; // 两次读取之间的计数器差值
-    delta_ticks[0] = static_cast<int32_t>(ticks[0] - last_ticks[0]);
-    delta_ticks[1] = static_cast<int32_t>(ticks[1] - last_ticks[1]);
+    delta_ticks[MOTOR_LEFT] = static_cast<int32_t>(ticks[MOTOR_LEFT] - last_ticks[MOTOR_LEFT]);
+    delta_ticks[MOTOR_RIGHT] = static_cast<int32_t>(ticks[MOTOR_RIGHT] - last_ticks[MOTOR_RIGHT]);
 
     // 距离比时间获取速度: delta_ticks * 单脉冲距离 / 时间差
     // 原始单位为 mm/ms, 乘以 1000 转换为 mm/s, 方便 PID 计算与观察
     if (dt != 0) {
-        current_motor_speeds_[0] = static_cast<float>(delta_ticks[0]) * distance_per_tick_mm_ /
-                                   static_cast<float>(dt) * MS_TO_S;
-        current_motor_speeds_[1] = static_cast<float>(delta_ticks[1]) * distance_per_tick_mm_ /
-                                   static_cast<float>(dt) * MS_TO_S;
+        current_motor_speeds_[MOTOR_LEFT] = static_cast<float>(delta_ticks[MOTOR_LEFT]) *
+                                            distance_per_tick_mm_ / static_cast<float>(dt) *
+                                            MS_TO_S;
+        current_motor_speeds_[MOTOR_RIGHT] = static_cast<float>(delta_ticks[MOTOR_RIGHT]) *
+                                             distance_per_tick_mm_ / static_cast<float>(dt) *
+                                             MS_TO_S;
     }
 
     // 更新上一次更新时间为当前时间
     last_update_time = now;
     // 更新上一次编码器读数为当前编码器读数
-    last_ticks[0] = ticks[0];
-    last_ticks[1] = ticks[1];
+    last_ticks[MOTOR_LEFT] = ticks[MOTOR_LEFT];
+    last_ticks[MOTOR_RIGHT] = ticks[MOTOR_RIGHT];
 
     // 更新里程计
     update_odom(dt);
 }
 
-float Kinematics::get_motor_speed(uint8_t motor_id) const {
+float Kinematics::get_motor_speed(MotorID motor_id) const {
     return current_motor_speeds_[motor_id];
 }
 
@@ -94,8 +100,8 @@ void Kinematics::update_odom(uint64_t dt) {
     // 运动学正解: 电机转速 -> 车体速度
     float body_velocities[2];
     this->kinematics_forward(current_motor_speeds_, body_velocities);
-    odom_.linear_velocity = body_velocities[0];
-    odom_.angular_velocity = body_velocities[1];
+    odom_.linear_velocity = body_velocities[VEL_LINEAR];
+    odom_.angular_velocity = body_velocities[VEL_ANGULAR];
     // 单位换算, mm/s -> m/s
     odom_.linear_velocity /= MS_TO_S;
 

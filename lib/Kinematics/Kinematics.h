@@ -1,6 +1,7 @@
 #ifndef KINEMATICS_H
 #define KINEMATICS_H
 
+#include <SemanticEnums.h>
 #include <cmath>
 #include <cstdint>
 
@@ -48,18 +49,18 @@ class Kinematics {
     void set_wheel_distance(float wheel_distance);    // 设置轮子间距
 
     // 运动学正解: 电机转速 -> 车体速度, 仅用于里程计计算
-    // motor_speeds: [0]=左电机, [1]=右电机, 单位 mm/s
-    // body_velocities: [0]=线速度, 单位 mm/s; [1]=角速度, 单位 rad/s
+    // motor_speeds: [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
+    // body_velocities: [VEL_LINEAR]=线速度, 单位 mm/s; [VEL_ANGULAR]=角速度, 单位 rad/s
     void kinematics_forward(const float motor_speeds[2], float body_velocities[2]);
     // 运动学逆解: 车体速度 -> 电机目标转速
-    // body_velocities: [0]=目标线速度, 单位 mm/s; [1]=目标角速度, 单位 rad/s
-    // motor_speeds: [0]=左电机, [1]=右电机, 单位 mm/s
+    // body_velocities: [VEL_LINEAR]=目标线速度, 单位 mm/s; [VEL_ANGULAR]=目标角速度, 单位 rad/s
+    // motor_speeds: [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
     void kinematics_inverse(const float body_velocities[2], float motor_speeds[2]);
 
     // 更新电机速度和编码器数据
-    // ticks: [0]=左编码器, [1]=右编码器
+    // ticks: [MOTOR_LEFT]=左编码器, [MOTOR_RIGHT]=右编码器
     void update_motor_speed(uint64_t now, const int32_t ticks[2]);
-    float get_motor_speed(uint8_t motor_id) const; // 获取电机速度
+    float get_motor_speed(MotorID motor_id) const; // 获取电机速度
 
     void update_odom(uint64_t dt);            // 更新里程计数据
     odom_t& get_odom();                       // 获取里程计数据 (可写)
