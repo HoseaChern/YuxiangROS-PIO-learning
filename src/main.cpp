@@ -110,8 +110,8 @@ void setup() {
     motor.attachMotor(1, MOTOR1_PIN_A, MOTOR1_PIN_B); // 电动机1
 
     // 初始化PID控制器
-    pid_controller[0].update_PID(PID_KP, PID_KI, PID_KD);
-    pid_controller[1].update_PID(PID_KP, PID_KI, PID_KD);
+    pid_controller[0].update_pid(PID_KP, PID_KI, PID_KD);
+    pid_controller[1].update_pid(PID_KP, PID_KI, PID_KD);
     pid_controller[0].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
     pid_controller[1].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
 

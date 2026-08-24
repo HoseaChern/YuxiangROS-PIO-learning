@@ -20,15 +20,15 @@ class PIDController {
     // 编译期常量, 积分上界
     static constexpr float INTEGRAL_SUP_LIMIT = 2500.0f;
 
-    float target_;       // 目标值
-    float output_limit_; // 输出限幅 (对称 ±output_limit_)
-    float kp_;           // 比例系数
-    float ki_;           // 积分系数
-    float kd_;           // 微分系数
+    float target_ = 0.0f;       // 目标值
+    float output_limit_ = 0.0f; // 输出限幅 (对称 ±output_limit_)
+    float kp_ = 0.0f;           // 比例系数
+    float ki_ = 0.0f;           // 积分系数
+    float kd_ = 0.0f;           // 微分系数
 
-    float error_sum_;  // 误差累积和
-    float d_error_;    // 误差变化率
-    float error_last_; // 上次误差
+    float error_sum_ = 0.0f;  // 误差累积和
+    float d_error_ = 0.0f;    // 微分项误差 (上次误差 - 当前误差, 即误差变化率取负)
+    float error_last_ = 0.0f; // 上次误差
 
   public:
     PIDController() = default;                   //默认构造函数
@@ -36,7 +36,7 @@ class PIDController {
 
     int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
     void update_target(float target);  // 更新目标值
-    void update_PID(float kp, float ki, float kd); // 更新PID系数
+    void update_pid(float kp, float ki, float kd); // 更新PID系数, 不重置内部状态
     void reset();                                  // 重置PID控制器
     void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]
 };
