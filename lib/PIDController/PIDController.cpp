@@ -21,11 +21,11 @@ int16_t PIDController::update_pwm(float current) {
 
     // 计算积分项并进行积分限制
     error_sum_ += error; // 计算积分项
-    if (error_sum_ > intergral_sup_) {
-        error_sum_ = intergral_sup_; // 控制上界
+    if (error_sum_ > INTEGRAL_SUP_LIMIT) {
+        error_sum_ = INTEGRAL_SUP_LIMIT; // 控制上界
     }
-    if (error_sum_ < -intergral_sup_) {
-        error_sum_ = -intergral_sup_; // 控制下界
+    if (error_sum_ < -INTEGRAL_SUP_LIMIT) {
+        error_sum_ = -INTEGRAL_SUP_LIMIT; // 控制下界
     }
 
     // 计算输出并进行输出限制

@@ -17,16 +17,18 @@
  */
 class PIDController {
   private:
+    // 编译期常量, 积分上界
+    static constexpr float INTEGRAL_SUP_LIMIT = 2500.0f;
+
     float target_;       // 目标值
     float output_limit_; // 输出限幅 (对称 ±output_limit_)
     float kp_;           // 比例系数
     float ki_;           // 积分系数
     float kd_;           // 微分系数
 
-    float error_sum_;               // 误差累积和
-    float d_error_;                 // 误差变化率
-    float error_last_;              // 上次误差
-    float intergral_sup_ = 2500.0f; // 积分值上界
+    float error_sum_;  // 误差累积和
+    float d_error_;    // 误差变化率
+    float error_last_; // 上次误差
 
   public:
     PIDController() = default;                   //默认构造函数
