@@ -117,26 +117,20 @@ void setup() {
 
     // 初始化轮间距和电机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
-    kinematics.set_motor_param(0, MOTOR_PARAM);
-    kinematics.set_motor_param(1, MOTOR_PARAM);
+    kinematics.set_motor_param(MOTOR_PARAM); // 标定量标量化: 两电机共用
 
     // 计算运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
     // 仅初始化用一次的测试目标值, 声明为 const 局部变量, 作用域最小化
     const float target_linear_velocity = 50.0; // 目标线速度, 单位 mm/s
     const float target_angular_velocity = 0.1; // 目标角速度, 单位 rad/s
 
-    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
-    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
-    kinematics.kinematics_inverse(
-        target_linear_velocity,
-        target_angular_velocity,
-        output_left_speed,
-        output_right_speed
-    );
+    const float body_velocities[2] = {target_linear_velocity, target_angular_velocity}; // 车体速度: [0]=线速度 mm/s, [1]=角速度 rad/s
+    float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
+    kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
     // PID更新目标轮速
-    pid_controller[0].update_target(output_left_speed);
-    pid_controller[1].update_target(output_right_speed);
+    pid_controller[0].update_target(motor_speeds[0]);
+    pid_controller[1].update_target(motor_speeds[1]);
 
     // 创建任务运行
     // 参数依次为: 任务函数, 任务名称, 任务堆栈字节数, 传递给任务函数的参数, 任务优先级, 任务句柄
@@ -173,19 +167,17 @@ void twist_callback(const void* msgin) {
     const geometry_msgs__msg__Twist* twist_msg =
         static_cast<const geometry_msgs__msg__Twist*>(msgin);
 
-    // 计算运动学逆解
-    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
-    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量，仅用于本次逆解计算
-    kinematics.kinematics_inverse(
-        twist_msg->linear.x * M_TO_MM, // 单位换算, m/s -> mm/s
-        twist_msg->angular.z,
-        output_left_speed,
-        output_right_speed
-    );
+    // 计算运动学逆解: 车体速度 -> 电机目标转速
+    const float body_velocities[2] = {
+        twist_msg->linear.x * M_TO_MM, // [0]=线速度, 单位换算 m/s -> mm/s
+        twist_msg->angular.z           // [1]=角速度, 单位 rad/s
+    };
+    float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
+    kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
     // PID更新目标轮速
-    pid_controller[0].update_target(output_left_speed);
-    pid_controller[1].update_target(output_right_speed);
+    pid_controller[0].update_target(motor_speeds[0]);
+    pid_controller[1].update_target(motor_speeds[1]);
 }
 
 /**
@@ -307,7 +299,8 @@ void micro_ros_task(void* parameter) {
  * 再经 PID 控制器输出 PWM 值更新电机。
  */
 void update_and_control() {
-    kinematics.update_motor_speed(millis(), encoders[0].getTicks(), encoders[1].getTicks());
+    const int32_t ticks[2] = {encoders[0].getTicks(), encoders[1].getTicks()}; // 编码器 tick: [0]=左, [1]=右
+    kinematics.update_motor_speed(millis(), ticks);
 
     motor.updateMotorSpeed(0, pid_controller[0].update_pwm(kinematics.get_motor_speed(0)));
     motor.updateMotorSpeed(1, pid_controller[1].update_pwm(kinematics.get_motor_speed(1)));

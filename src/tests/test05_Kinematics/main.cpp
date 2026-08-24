@@ -80,23 +80,17 @@ void setup() {
 
     // 初始化轮子间距和电动机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
-    kinematics.set_motor_param(0, DISTANCE_PER_TICK_MM);
-    kinematics.set_motor_param(1, DISTANCE_PER_TICK_MM);
+    kinematics.set_motor_param(DISTANCE_PER_TICK_MM); // 标定量标量化: 两电机共用
 
     // 运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
     // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
-    float output_left_speed;  // 目标左轮速度, 单位 mm/s, 临时中间变量
-    float output_right_speed; // 目标右轮速度, 单位 mm/s, 临时中间变量
-    kinematics.kinematics_inverse(
-        TARGET_LINEAR_SPEED_MM_S,
-        TARGET_ANGULAR_SPEED_RAD_S,
-        output_left_speed,
-        output_right_speed
-    );
+    const float body_velocities[2] = {TARGET_LINEAR_SPEED_MM_S, TARGET_ANGULAR_SPEED_RAD_S}; // 车体速度: [0]=线速度 mm/s, [1]=角速度 rad/s
+    float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
+    kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
     // PID 初始化目标轮速
-    pid_controller[0].update_target(output_left_speed);
-    pid_controller[1].update_target(output_right_speed);
+    pid_controller[0].update_target(motor_speeds[0]);
+    pid_controller[1].update_target(motor_speeds[1]);
 }
 
 void loop() {
@@ -120,7 +114,8 @@ namespace {
  * 再经 PID 控制器输出 PWM 值更新电机。
  */
 void update_and_control() {
-    kinematics.update_motor_speed(millis(), encoders[0].getTicks(), encoders[1].getTicks());
+    const int32_t ticks[2] = {encoders[0].getTicks(), encoders[1].getTicks()}; // 编码器 tick: [0]=左, [1]=右
+    kinematics.update_motor_speed(millis(), ticks);
 
     motor.updateMotorSpeed(0, pid_controller[0].update_pwm(kinematics.get_motor_speed(0)));
     motor.updateMotorSpeed(1, pid_controller[1].update_pwm(kinematics.get_motor_speed(1)));
