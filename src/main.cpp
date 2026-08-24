@@ -22,40 +22,49 @@
 #include "secrets.h"
 
 // ============================================================================
-// 全局状态：匿名命名空间限定为本文件（内部链接），符合 C++ 规范
+// 全局状态: 匿名命名空间限定为本文件（内部链接），符合 C++ 规范
 // 规则: 编译期常量一律 constexpr; 可变全局集中于此并注明被谁跨函数共享
 // ============================================================================
 namespace {
 
-// ---- 编译期常量 ----
+// ---- 串口参数 ----
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// 编码器引脚 (编码器0: 15/16, 编码器1: 18/17)
-
-constexpr uint8_t ENC_LEFT_PIN_A = 15;
-constexpr uint8_t ENC_LEFT_PIN_B = 16;
-constexpr uint8_t ENC_RIGHT_PIN_A = 18;
-constexpr uint8_t ENC_RIGHT_PIN_B = 17;
-
-// 电机引脚 (电机0: 4/5, 电机1: 7/6)
+// ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
 constexpr uint8_t MOTOR_LEFT_PIN_A = 4;
 constexpr uint8_t MOTOR_LEFT_PIN_B = 5;
 constexpr uint8_t MOTOR_RIGHT_PIN_A = 7;
 constexpr uint8_t MOTOR_RIGHT_PIN_B = 6;
 
-// PID 参数
+// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr float PID_KP = 0.625;           // 比例增益
-constexpr float PID_KI = 0.125;           // 积分增益
-constexpr float PID_KD = 0.0;             // 微分增益
-constexpr float PID_OUTPUT_LIMIT = 100.0; // 输出限幅 ±100
+constexpr uint8_t ENC_LEFT_PIN_A = 15;
+constexpr uint8_t ENC_LEFT_PIN_B = 16;
+constexpr uint8_t ENC_RIGHT_PIN_A = 18;
+constexpr uint8_t ENC_RIGHT_PIN_B = 17;
 
-// 运动学参数
+// ---- PID 参数 ----
 
-constexpr float WHEEL_DISTANCE_MM = 175.0; // 轮间距, 单位 mm
-constexpr float MOTOR_PARAM = 0.1427138f;  // 电机标定参数
+constexpr float PID_KP = 0.625f;           // 比例增益
+constexpr float PID_KI = 0.125f;           // 积分增益
+constexpr float PID_KD = 0.0f;             // 微分增益
+constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
+
+// ---- 运动学参数 ----
+
+constexpr float WHEEL_DISTANCE_MM = 175.0f; // 轮间距, 单位 mm
+constexpr float MOTOR_PARAM = 0.1427138f;   // 电机标定参数
+
+// ---- 单位换算 ----
+
+constexpr float M_TO_MM = 1000.0f; // m/s -> mm/s
+constexpr double S_TO_NS = 1e6;    // 秒 -> 纳秒 (时间戳换算)
+
+// ---- 控制周期 ----
+
+constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
 
 // ---- 网络配置 ----
 // 注意: 凭据必须是可写 char 数组, 因库接口要求 char*, 故不能 constexpr
@@ -64,33 +73,30 @@ constexpr float MOTOR_PARAM = 0.1427138f;  // 电机标定参数
 constexpr char AGENT_IP_STR[] = "192.168.2.120"; // 主机 IP(运行 micro-ROS Agent 的电脑)
 constexpr uint16_t AGENT_PORT = 8888;            // Agent UDP 端口
 
-// 任务与定时器参数
+// ---- 任务参数 ----
 
 constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单位 ms
-constexpr uint32_t LOOP_DELAY_MS = 10;           // 主循环调度节拍
-constexpr uint8_t EXECUTOR_HANDLES = 2;          // 执行器句柄数(速度订阅+里程计定时器)
-constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间
-constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长
-constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔
+constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间, 单位 ms
+constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长, 单位 ms
+constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, 单位 ms
 
-// 单位换算
+// ---- 订阅参数 ----
 
-constexpr float M_TO_MM = 1000.0; // m/s -> mm/s
-constexpr double S_TO_NS = 1e6;   // 秒 -> 纳秒 (时间戳换算)
+constexpr uint8_t EXECUTOR_HANDLES = 2; // 执行器句柄数(速度订阅+里程计定时器)
 
-// ---- 可变全局状态 (跨函数共享, 需长期存活) ----
+// ---- 可变全局状态 (跨 setup/loop/micro_ros_task/twist_callback 共享) ----
 
-Esp32McpwmMotor motor;           // 电机控制 (setup/loop 共享)
-Esp32PcntEncoder encoders[2];    // 编码器 (setup/loop 共享)
-PIDController pid_controller[2]; // PID 控制器 (twist_callback/loop 共享)
-Kinematics kinematics;           // 运动学正逆解 (twist_callback/odom_callback/loop 共享)
+Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
+Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
+PIDController pid_controller[2]; // PID 控制器对象数组 (setup/twist_callback/loop 共享)
+Kinematics kinematics;           // 运动学正逆解对象 (setup/twist_callback/odom_callback/loop 共享)
 
 nav_msgs__msg__Odometry pub_msg; // 里程计消息 (odom_callback 填充, micro_ros_task 初始化)
 rcl_publisher_t publisher;       // 里程计发布者 (micro_ros_task 初始化)
 
-// ---- 函数前向声明（内部链接; 经函数指针传给 micro-ROS/FreeRTOS, 链接性不影响取址）----
+// ---- 函数前向声明（内部链接） ----
 
 void twist_callback(const void* msgin);
 void odom_callback(rcl_timer_t* timer, int64_t last_call_time);
