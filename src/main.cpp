@@ -54,13 +54,18 @@ constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
 
 // ---- 运动学参数 ----
 
-constexpr float WHEEL_DISTANCE_MM = 175.0f; // 轮间距, 单位 mm
-constexpr float MOTOR_PARAM = 0.1427138f;   // 电机标定参数
+constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
+constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
+
+// ---- 目标速度 ----
+
+constexpr float TARGET_LINEAR_SPEED_MM_S = 50.0f;  // 目标线速度, 单位 mm/s
+constexpr float TARGET_ANGULAR_SPEED_RAD_S = 0.1f; // 目标角速度, 单位 rad/s
 
 // ---- 单位换算 ----
 
-constexpr float M_TO_MM = 1000.0f; // m/s -> mm/s
-constexpr double S_TO_NS = 1e6;    // 秒 -> 纳秒 (时间戳换算)
+constexpr float MPS_TO_MMPS = 1000.0f; // m/s -> mm/s
+constexpr double S_TO_NS = 1e6;        // 秒 -> 纳秒 (时间戳换算)
 
 // ---- 控制周期 ----
 
@@ -98,7 +103,7 @@ rcl_publisher_t publisher;       // 里程计发布者 (micro_ros_task 初始化
 
 // ---- 函数前向声明（内部链接） ----
 
-void twist_callback(const void* msgin);
+void twist_callback(const void* msg_in);
 void odom_callback(rcl_timer_t* timer, int64_t last_call_time);
 void micro_ros_task(void* parameter);
 void update_and_control();
@@ -124,15 +129,12 @@ void setup() {
 
     // 初始化轮间距和电机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
-    kinematics.set_motor_param(MOTOR_PARAM); // 标定量标量化: 两电机共用
+    kinematics.set_motor_param(DISTANCE_PER_TICK_MM); // 标定量标量化: 两电机共用
 
-    // 计算运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
-    // 仅初始化用一次的测试目标值, 声明为 const 局部变量, 作用域最小化
-    const float target_linear_velocity = 50.0; // 目标线速度, 单位 mm/s
-    const float target_angular_velocity = 0.1; // 目标角速度, 单位 rad/s
-
+    // 运动学逆解: 目标线速度和角速度 -> 目标左轮速度和右轮速度
+    // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 test05/06/07)
     // 车体速度: [VEL_LINEAR]=线速度 mm/s, [VEL_ANGULAR]=角速度 rad/s
-    const float body_velocities[2] = {target_linear_velocity, target_angular_velocity};
+    const float body_velocities[2] = {TARGET_LINEAR_SPEED_MM_S, TARGET_ANGULAR_SPEED_RAD_S};
     // 电机转速: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右, 单位 mm/s, 仅用于本次逆解计算
     float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
@@ -168,18 +170,18 @@ namespace {
 /**
  * @brief 速度消息订阅回调函数
  * 
- * @param msgin 消息指针
+ * @param msg_in 消息指针
  */
-void twist_callback(const void* msgin) {
+void twist_callback(const void* msg_in) {
     // 将订阅消息强制转换为 Twist 消息指针
     // 在 pure-C 中, 空指针可以泛指任意类型指针; 因此在使用时, 应当强制类型转换到期待的类型
     const geometry_msgs__msg__Twist* twist_msg =
-        static_cast<const geometry_msgs__msg__Twist*>(msgin);
+        static_cast<const geometry_msgs__msg__Twist*>(msg_in);
 
     // 计算运动学逆解: 车体速度 -> 电机目标转速
     const float body_velocities[2] = {
         // [VEL_LINEAR]=线速度, 单位换算 m/s -> mm/s
-        static_cast<float>(twist_msg->linear.x * M_TO_MM),
+        static_cast<float>(twist_msg->linear.x * MPS_TO_MMPS),
         // [VEL_ANGULAR]=角速度, 单位 rad/s
         static_cast<float>(twist_msg->angular.z)
     };

@@ -47,8 +47,8 @@ constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮�
 
 // ---- 默认目标速度 (在收到 /cmd_vel 前使用) ----
 
-constexpr float DEFAULT_LINEAR_SPEED_MM_S = 50.0f;  // 默认目标线速度, 单位 mm/s
-constexpr float DEFAULT_ANGULAR_SPEED_RAD_S = 0.1f; // 默认目标角速度, 单位 rad/s
+constexpr float TARGET_LINEAR_SPEED_MM_S = 50.0f;  // 默认目标线速度, 单位 mm/s
+constexpr float TARGET_ANGULAR_SPEED_RAD_S = 0.1f; // 默认目标角速度, 单位 rad/s
 
 // ---- 单位换算 ----
 
@@ -119,7 +119,7 @@ void setup() {
     // 默认目标速度, 避免订阅消息到达前电机无目标
     // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
     // 车体速度: [VEL_LINEAR]=线速度 mm/s, [VEL_ANGULAR]=角速度 rad/s
-    const float body_velocities[2] = {DEFAULT_LINEAR_SPEED_MM_S, DEFAULT_ANGULAR_SPEED_RAD_S};
+    const float body_velocities[2] = {TARGET_LINEAR_SPEED_MM_S, TARGET_ANGULAR_SPEED_RAD_S};
     // 电机转速: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右, 单位 mm/s, 仅用于本次逆解计算
     float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
