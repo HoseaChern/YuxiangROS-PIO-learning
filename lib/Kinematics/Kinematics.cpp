@@ -96,7 +96,7 @@ void Kinematics::update_odom(uint16_t dt) {
 
     // 计算角位置
     odom_.yaw += odom_.angular_velocity * dt_s;
-    TransAngleInPI(odom_.yaw, odom_.yaw);
+    TransAngleInPI(odom_.yaw);
 
     // 计算位置
     odom_.x += odom_.linear_velocity * std::cos(odom_.yaw) * dt_s;
@@ -106,16 +106,15 @@ void Kinematics::update_odom(uint16_t dt) {
 odom_t& Kinematics::get_odom() { return odom_; }
 
 /**
- * @brief 将角度转换为[-PI, PI]区间
+ * @brief 将角度归一化到[-PI, PI]区间
  * 
- * @param angle 输入角度
- * @param[out] output_angle 输出角度
+ * @param[in,out] angle 输入角度, 归一化后原地返回
  */
-void Kinematics::TransAngleInPI(float angle, float& output_angle) {
-    if (angle > PI_F) {
-        output_angle -= 2.0f * PI_F;
+void Kinematics::TransAngleInPI(float& angle) {
+    // fmod 归一化: 先平移 PI 再取模, 消除多次旋转的累积误差
+    angle = std::fmod(angle + PI_F, 2.0f * PI_F);
+    if (angle < 0.0f) {
+        angle += 2.0f * PI_F;
     }
-    if (angle < -PI_F) {
-        output_angle += 2.0f * PI_F;
-    }
+    angle -= PI_F;
 }

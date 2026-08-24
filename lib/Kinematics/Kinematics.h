@@ -63,7 +63,7 @@ class Kinematics {
 
     void update_odom(uint16_t dt);                                // 更新里程计数据
     odom_t& get_odom();                                           // 获取里程计数据
-    static void TransAngleInPI(float angle, float& output_angle); //将角度转换为-PI到PI之间
+    static void TransAngleInPI(float& angle); // 将角度归一化到[-PI, PI]
 };
 
 #endif // KINEMATICS_H
