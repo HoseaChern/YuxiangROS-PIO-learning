@@ -11,12 +11,11 @@ void Kinematics::set_motor_param(float distance_per_tick_mm) {
 void Kinematics::set_wheel_distance(float wheel_distance) { wheel_distance_ = wheel_distance; }
 
 /**
- * @brief 运动学正解计算
+ * @brief 运动学正解: 电机转速 -> 车体速度
  * 
- * @param left_speed 左轮速度, 单位 mm/s
- * @param right_speed 右轮速度, 单位 mm/s
- * @param[out] output_linear_velocity 线速度, 单位 mm/s
- * @param[out] output_angular_velocity 角速度, 单位 rad/s
+ * @param motor_speeds 电机转速, [0]=左电机, [1]=右电机, 单位 mm/s
+ * @param[out] body_velocities 车体速度, [0]=线速度, 单位 mm/s; [1]=角速度, 单位 rad/s
+ * @note 仅用于里程计计算
  */
 void Kinematics::kinematics_forward(const float motor_speeds[2], float body_velocities[2]) {
     body_velocities[0] = (motor_speeds[0] + motor_speeds[1]) / 2.0f;              // 线速度
@@ -24,12 +23,10 @@ void Kinematics::kinematics_forward(const float motor_speeds[2], float body_velo
 }
 
 /**
- * @brief 运动学逆解计算
+ * @brief 运动学逆解: 车体速度 -> 电机目标转速
  * 
- * @param linear_velocity 线速度, 单位 mm/s
- * @param angular_velocity 角速度, 单位 rad/s
- * @param[out] output_left_speed 左轮速度, 单位 mm/s
- * @param[out] output_right_speed 右轮速度, 单位 mm/s
+ * @param body_velocities 车体速度, [0]=目标线速度, 单位 mm/s; [1]=目标角速度, 单位 rad/s
+ * @param[out] motor_speeds 电机目标转速, [0]=左电机, [1]=右电机, 单位 mm/s
  */
 void Kinematics::kinematics_inverse(const float body_velocities[2], float motor_speeds[2]) {
     motor_speeds[0] = body_velocities[0] - body_velocities[1] * wheel_distance_ / 2.0f; // 左轮
@@ -37,11 +34,10 @@ void Kinematics::kinematics_inverse(const float body_velocities[2], float motor_
 }
 
 /**
- * @brief 更新电机速度和编码器数据
+ * @brief 更新电机速度与里程计数据
  * 
- * @param now 当前时间
- * @param left_tick 左轮编码器脉冲数
- * @param right_tick 右轮编码器脉冲数
+ * @param now 当前时间, 单位 ms
+ * @param ticks 编码器读数, [0]=左编码器, [1]=右编码器
  */
 void Kinematics::update_motor_speed(uint64_t now, const int32_t ticks[2]) {
     // 静态局部变量: 采样基线跨多次调用保持
