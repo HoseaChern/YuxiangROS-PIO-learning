@@ -104,6 +104,7 @@ void Kinematics::update_odom(uint64_t dt) {
 }
 
 odom_t& Kinematics::get_odom() { return odom_; }
+const odom_t& Kinematics::get_odom() const { return odom_; }
 
 /**
  * @brief 将角度归一化到[-PI, PI]区间
