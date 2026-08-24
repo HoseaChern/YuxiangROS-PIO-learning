@@ -1,5 +1,7 @@
 #include "Kinematics.h"
 
+constexpr float Kinematics::MS_TO_S; // C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
+
 void Kinematics::set_motor_param(uint8_t motor_id, float per_pulse_distance) {
     motor_params_[motor_id].per_pulse_distance = per_pulse_distance;
 }
@@ -63,9 +65,9 @@ void Kinematics::update_motor_speed(uint64_t current_time, int32_t left_tick, in
         static_cast<float>(delta_left_tick * motor_params_[0].per_pulse_distance) / dt;
     motor_params_[1].motor_speed =
         static_cast<float>(delta_right_tick * motor_params_[1].per_pulse_distance) / dt;
-    // 单位换算, m/s -> mm/s
-    motor_params_[0].motor_speed *= 1000;
-    motor_params_[1].motor_speed *= 1000;
+    // 单位换算, mm/ms -> mm/s
+    motor_params_[0].motor_speed *= MS_TO_S;
+    motor_params_[1].motor_speed *= MS_TO_S;
 
     //更新里程计
     update_odom(dt);
@@ -76,8 +78,8 @@ int16_t Kinematics::get_motor_speed(uint8_t motor_id) {
 }
 
 void Kinematics::update_odom(uint16_t dt) {
-    // 单位换算, ms->s
-    float dt_s = static_cast<float>(dt) / 1000.0;
+    // 单位换算, ms -> s
+    float dt_s = static_cast<float>(dt) / MS_TO_S;
 
     // 运动学正解
     this->kinematics_forward(
@@ -86,8 +88,8 @@ void Kinematics::update_odom(uint16_t dt) {
         odom_.linear_velocity,
         odom_.angular_velocity
     );
-    //单位换算, mm/s->m/s
-    odom_.linear_velocity /= 1000.0;
+    // 单位换算, mm/s -> m/s
+    odom_.linear_velocity /= MS_TO_S;
 
     // 计算角位置
     odom_.yaw += odom_.angular_velocity * dt_s;
