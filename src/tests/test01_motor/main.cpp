@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Esp32McpwmMotor.h>
+#include <SemanticEnums.h>
 
 namespace {
 
@@ -9,10 +10,10 @@ constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 4;
-constexpr uint8_t MOTOR0_PIN_B = 5;
-constexpr uint8_t MOTOR1_PIN_A = 7;
-constexpr uint8_t MOTOR1_PIN_B = 6;
+constexpr uint8_t MOTOR_LEFT_PIN_A = 4;
+constexpr uint8_t MOTOR_LEFT_PIN_B = 5;
+constexpr uint8_t MOTOR_RIGHT_PIN_A = 7;
+constexpr uint8_t MOTOR_RIGHT_PIN_B = 6;
 
 // ---- 测试参数 ----
 
@@ -31,23 +32,23 @@ void setup() {
         ;
     }
 
-    motor.attachMotor(0, MOTOR0_PIN_A, MOTOR0_PIN_B);
-    motor.attachMotor(1, MOTOR1_PIN_A, MOTOR1_PIN_B);
+    motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
+    motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
 }
 
 void loop() {
     Serial.println("forward");
-    motor.updateMotorSpeed(0, MOTOR_SPEED);
-    motor.updateMotorSpeed(1, MOTOR_SPEED);
+    motor.updateMotorSpeed(MOTOR_LEFT, MOTOR_SPEED);
+    motor.updateMotorSpeed(MOTOR_RIGHT, MOTOR_SPEED);
     delay(STEP_DELAY_MS);
 
     Serial.println("backward");
-    motor.updateMotorSpeed(0, -MOTOR_SPEED);
-    motor.updateMotorSpeed(1, -MOTOR_SPEED);
+    motor.updateMotorSpeed(MOTOR_LEFT, -MOTOR_SPEED);
+    motor.updateMotorSpeed(MOTOR_RIGHT, -MOTOR_SPEED);
     delay(STEP_DELAY_MS);
 
     Serial.println("stop");
-    motor.updateMotorSpeed(0, 0);
-    motor.updateMotorSpeed(1, 0);
+    motor.updateMotorSpeed(MOTOR_LEFT, 0);
+    motor.updateMotorSpeed(MOTOR_RIGHT, 0);
     delay(STEP_DELAY_MS);
 }

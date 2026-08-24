@@ -3,6 +3,7 @@
 #include <Esp32PcntEncoder.h>
 #include <Kinematics.h>
 #include <PIDController.h>
+#include <SemanticEnums.h>
 #include <WiFi.h>
 #include <geometry_msgs/msg/twist.h>
 #include <micro_ros_platformio.h>
@@ -20,17 +21,17 @@ constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // ---- 编码器引脚 (编码器0: 4/5, 编码器1: 14/15) ----
 
-constexpr uint8_t ENC0_PIN_A = 4;
-constexpr uint8_t ENC0_PIN_B = 5;
-constexpr uint8_t ENC1_PIN_A = 14;
-constexpr uint8_t ENC1_PIN_B = 15;
+constexpr uint8_t ENC_LEFT_PIN_A = 4;
+constexpr uint8_t ENC_LEFT_PIN_B = 5;
+constexpr uint8_t ENC_RIGHT_PIN_A = 14;
+constexpr uint8_t ENC_RIGHT_PIN_B = 15;
 
 // ---- 电机引脚 (电机0: 10/11, 电机1: 12/13) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 10;
-constexpr uint8_t MOTOR0_PIN_B = 11;
-constexpr uint8_t MOTOR1_PIN_A = 12;
-constexpr uint8_t MOTOR1_PIN_B = 13;
+constexpr uint8_t MOTOR_LEFT_PIN_A = 10;
+constexpr uint8_t MOTOR_LEFT_PIN_B = 11;
+constexpr uint8_t MOTOR_RIGHT_PIN_A = 12;
+constexpr uint8_t MOTOR_RIGHT_PIN_B = 13;
 
 // ---- PID 参数 ----
 
@@ -98,18 +99,18 @@ void setup() {
     }
 
     // 初始化编码器
-    encoders[0].init(0, ENC0_PIN_A, ENC0_PIN_B);
-    encoders[1].init(1, ENC1_PIN_A, ENC1_PIN_B);
+    encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);
+    encoders[MOTOR_RIGHT].init(MOTOR_RIGHT, ENC_RIGHT_PIN_A, ENC_RIGHT_PIN_B);
 
     // 初始化电动机
-    motor.attachMotor(0, MOTOR0_PIN_A, MOTOR0_PIN_B);
-    motor.attachMotor(1, MOTOR1_PIN_A, MOTOR1_PIN_B);
+    motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
+    motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
 
     // 初始化 PID 控制器参数
-    pid_controller[0].update_pid(PID_KP, PID_KI, PID_KD);
-    pid_controller[1].update_pid(PID_KP, PID_KI, PID_KD);
-    pid_controller[0].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
-    pid_controller[1].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
+    pid_controller[MOTOR_LEFT].update_pid(PID_KP, PID_KI, PID_KD);
+    pid_controller[MOTOR_RIGHT].update_pid(PID_KP, PID_KI, PID_KD);
+    pid_controller[MOTOR_LEFT].output_limit(PID_OUTPUT_LIMIT);  // 对称输出限幅 ±PID_OUTPUT_LIMIT
+    pid_controller[MOTOR_RIGHT].output_limit(PID_OUTPUT_LIMIT); // 对称输出限幅 ±PID_OUTPUT_LIMIT
 
     // 初始化轮子间距和电动机参数
     kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
@@ -117,16 +118,15 @@ void setup() {
 
     // 默认目标速度, 避免订阅消息到达前电机无目标
     // 逆解输出仅本次使用, 声明为局部变量, 作用域最小化 (仿照 main.cpp)
-    const float body_velocities[2] = {
-        DEFAULT_LINEAR_SPEED_MM_S,
-        DEFAULT_ANGULAR_SPEED_RAD_S
-    };                     // 车体速度: [0]=线速度 mm/s, [1]=角速度 rad/s
-    float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
+    // 车体速度: [VEL_LINEAR]=线速度 mm/s, [VEL_ANGULAR]=角速度 rad/s
+    const float body_velocities[2] = {DEFAULT_LINEAR_SPEED_MM_S, DEFAULT_ANGULAR_SPEED_RAD_S};
+    // 电机转速: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右, 单位 mm/s, 仅用于本次逆解计算
+    float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
     // PID 初始化目标轮速
-    pid_controller[0].update_target(motor_speeds[0]);
-    pid_controller[1].update_target(motor_speeds[1]);
+    pid_controller[MOTOR_LEFT].update_target(motor_speeds[MOTOR_LEFT]);
+    pid_controller[MOTOR_RIGHT].update_target(motor_speeds[MOTOR_RIGHT]);
 
     // 创建任务运行 micro-ROS
     xTaskCreate(micro_ros_task, "micro_ros", MICRO_ROS_STACK_SIZE, NULL, MICRO_ROS_TASK_PRIO, NULL);
@@ -153,15 +153,18 @@ void twist_callback(const void* msg_in) {
     // 运动学逆解: 车体速度 -> 电机目标转速
     // linear.x 单位 m/s 转换为 mm/s, angular.z 单位 rad/s
     const float body_velocities[2] = {
-        static_cast<float>(twist_msg->linear.x * MPS_TO_MMPS), // [0]=线速度, 单位换算 m/s -> mm/s
-        static_cast<float>(twist_msg->angular.z)               // [1]=角速度, 单位 rad/s
+        // [VEL_LINEAR]=线速度, 单位换算 m/s -> mm/s
+        static_cast<float>(twist_msg->linear.x * MPS_TO_MMPS),
+        // [VEL_ANGULAR]=角速度, 单位 rad/s
+        static_cast<float>(twist_msg->angular.z)
     };
-    float motor_speeds[2]; // 电机转速: [0]=左, [1]=右, 单位 mm/s, 仅用于本次逆解计算
+    // 电机转速: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右, 单位 mm/s, 仅用于本次逆解计算
+    float motor_speeds[2];
     kinematics.kinematics_inverse(body_velocities, motor_speeds);
 
     // PID 更新目标轮速
-    pid_controller[0].update_target(motor_speeds[0]);
-    pid_controller[1].update_target(motor_speeds[1]);
+    pid_controller[MOTOR_LEFT].update_target(motor_speeds[MOTOR_LEFT]);
+    pid_controller[MOTOR_RIGHT].update_target(motor_speeds[MOTOR_RIGHT]);
 }
 
 /**
@@ -221,14 +224,18 @@ void micro_ros_task(void* parameter) {
  * 再经 PID 控制器输出 PWM 值更新电机。
  */
 void update_and_control() {
-    const int32_t ticks[2] = {
-        encoders[0].getTicks(),
-        encoders[1].getTicks()
-    }; // 编码器 tick: [0]=左, [1]=右
+    // 编码器 tick: [MOTOR_LEFT]=左, [MOTOR_RIGHT]=右
+    const int32_t ticks[2] = {encoders[MOTOR_LEFT].getTicks(), encoders[MOTOR_RIGHT].getTicks()};
     kinematics.update_motor_speed(millis(), ticks);
 
-    motor.updateMotorSpeed(0, pid_controller[0].update_pwm(kinematics.get_motor_speed(0)));
-    motor.updateMotorSpeed(1, pid_controller[1].update_pwm(kinematics.get_motor_speed(1)));
+    motor.updateMotorSpeed(
+        MOTOR_LEFT,
+        pid_controller[MOTOR_LEFT].update_pwm(kinematics.get_motor_speed(MOTOR_LEFT))
+    );
+    motor.updateMotorSpeed(
+        MOTOR_RIGHT,
+        pid_controller[MOTOR_RIGHT].update_pwm(kinematics.get_motor_speed(MOTOR_RIGHT))
+    );
 }
 
 } // namespace

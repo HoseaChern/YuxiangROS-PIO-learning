@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Esp32McpwmMotor.h>
 #include <Esp32PcntEncoder.h>
+#include <SemanticEnums.h>
 
 namespace {
 
@@ -10,17 +11,17 @@ constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
 
-constexpr uint8_t MOTOR0_PIN_A = 4;
-constexpr uint8_t MOTOR0_PIN_B = 5;
-constexpr uint8_t MOTOR1_PIN_A = 7;
-constexpr uint8_t MOTOR1_PIN_B = 6;
+constexpr uint8_t MOTOR_LEFT_PIN_A = 4;
+constexpr uint8_t MOTOR_LEFT_PIN_B = 5;
+constexpr uint8_t MOTOR_RIGHT_PIN_A = 7;
+constexpr uint8_t MOTOR_RIGHT_PIN_B = 6;
 
 // ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr uint8_t ENC0_PIN_A = 15;
-constexpr uint8_t ENC0_PIN_B = 16;
-constexpr uint8_t ENC1_PIN_A = 18;
-constexpr uint8_t ENC1_PIN_B = 17;
+constexpr uint8_t ENC_LEFT_PIN_A = 15;
+constexpr uint8_t ENC_LEFT_PIN_B = 16;
+constexpr uint8_t ENC_RIGHT_PIN_A = 18;
+constexpr uint8_t ENC_RIGHT_PIN_B = 17;
 
 // ---- 测试参数 ----
 
@@ -47,14 +48,14 @@ void setup() {
     }
 
     // 初始化编码器
-    encoders[0].init(0, ENC0_PIN_A, ENC0_PIN_B);
-    encoders[1].init(1, ENC1_PIN_A, ENC1_PIN_B);
+    encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);
+    encoders[MOTOR_RIGHT].init(MOTOR_RIGHT, ENC_RIGHT_PIN_A, ENC_RIGHT_PIN_B);
 
     // 初始化电动机并设置速度
-    motor.attachMotor(0, MOTOR0_PIN_A, MOTOR0_PIN_B);
-    motor.attachMotor(1, MOTOR1_PIN_A, MOTOR1_PIN_B);
-    motor.updateMotorSpeed(0, MOTOR_SPEED);
-    motor.updateMotorSpeed(1, MOTOR_SPEED);
+    motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
+    motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
+    motor.updateMotorSpeed(MOTOR_LEFT, MOTOR_SPEED);
+    motor.updateMotorSpeed(MOTOR_RIGHT, MOTOR_SPEED);
 }
 
 void loop() {
@@ -71,8 +72,8 @@ void loop() {
     if (is_first_run) {
         // 初始化采样基线, 避免首次循环时间差过大
         last_update_time = now;
-        last_ticks[0] = encoders[0].getTicks();
-        last_ticks[1] = encoders[1].getTicks();
+        last_ticks[MOTOR_LEFT] = encoders[MOTOR_LEFT].getTicks();
+        last_ticks[MOTOR_RIGHT] = encoders[MOTOR_RIGHT].getTicks();
         is_first_run = false;
     }
 
@@ -82,23 +83,29 @@ void loop() {
     float current_motor_speeds[2] = {0.0f, 0.0f}; // 当前两个电动机的速度
 
     // 计算编码器差值
-    delta_ticks[0] = static_cast<int32_t>(encoders[0].getTicks() - last_ticks[0]);
-    delta_ticks[1] = static_cast<int32_t>(encoders[1].getTicks() - last_ticks[1]);
+    delta_ticks[MOTOR_LEFT] =
+        static_cast<int32_t>(encoders[MOTOR_LEFT].getTicks() - last_ticks[MOTOR_LEFT]);
+    delta_ticks[MOTOR_RIGHT] =
+        static_cast<int32_t>(encoders[MOTOR_RIGHT].getTicks() - last_ticks[MOTOR_RIGHT]);
 
     // 距离比时间获取速度, 单位 mm/ms, 相当于 m/s
     if (dt != 0) {
-        current_motor_speeds[0] =
-            static_cast<float>(delta_ticks[0]) * DISTANCE_PER_TICK_MM / static_cast<float>(dt);
-        current_motor_speeds[1] =
-            static_cast<float>(delta_ticks[1]) * DISTANCE_PER_TICK_MM / static_cast<float>(dt);
+        current_motor_speeds[MOTOR_LEFT] = static_cast<float>(delta_ticks[MOTOR_LEFT]) *
+                                           DISTANCE_PER_TICK_MM / static_cast<float>(dt);
+        current_motor_speeds[MOTOR_RIGHT] = static_cast<float>(delta_ticks[MOTOR_RIGHT]) *
+                                            DISTANCE_PER_TICK_MM / static_cast<float>(dt);
     }
 
     // 更新上一次更新时间为当前时间
     last_update_time = now;
     // 更新上一次编码器读数为当前编码器读数
-    last_ticks[0] = encoders[0].getTicks();
-    last_ticks[1] = encoders[1].getTicks();
+    last_ticks[MOTOR_LEFT] = encoders[MOTOR_LEFT].getTicks();
+    last_ticks[MOTOR_RIGHT] = encoders[MOTOR_RIGHT].getTicks();
 
     // 输出数据
-    Serial.printf("speed1=%fm/s,speed2=%fm/s\n", current_motor_speeds[0], current_motor_speeds[1]);
+    Serial.printf(
+        "left=%fm/s, right=%fm/s\n",
+        current_motor_speeds[MOTOR_LEFT],
+        current_motor_speeds[MOTOR_RIGHT]
+    );
 }

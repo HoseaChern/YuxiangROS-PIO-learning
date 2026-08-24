@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Esp32PcntEncoder.h>
+#include <SemanticEnums.h>
 
 namespace {
 
@@ -9,10 +10,10 @@ constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
 // ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
 
-constexpr uint8_t ENC0_PIN_A = 15;
-constexpr uint8_t ENC0_PIN_B = 16;
-constexpr uint8_t ENC1_PIN_A = 18;
-constexpr uint8_t ENC1_PIN_B = 17;
+constexpr uint8_t ENC_LEFT_PIN_A = 15;
+constexpr uint8_t ENC_LEFT_PIN_B = 16;
+constexpr uint8_t ENC_RIGHT_PIN_A = 18;
+constexpr uint8_t ENC_RIGHT_PIN_B = 17;
 
 // ---- 测试参数 ----
 
@@ -30,16 +31,16 @@ void setup() {
         ;
     }
 
-    encoders[0].init(0, ENC0_PIN_A, ENC0_PIN_B);
-    encoders[1].init(1, ENC1_PIN_A, ENC1_PIN_B);
+    encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);
+    encoders[MOTOR_RIGHT].init(MOTOR_RIGHT, ENC_RIGHT_PIN_A, ENC_RIGHT_PIN_B);
 }
 
 void loop() {
     delay(LOOP_DELAY_MS);
-    int32_t tick0 = encoders[0].getTicks();
-    int32_t tick1 = encoders[1].getTicks();
+    int32_t tick_left = encoders[MOTOR_LEFT].getTicks();
+    int32_t tick_right = encoders[MOTOR_RIGHT].getTicks();
 
-    Serial.printf("tick1=%d,tick2=%d\n", tick0, tick1);
+    Serial.printf("tick_left=%d, tick_right=%d\n", tick_left, tick_right);
 }
 
 /**
