@@ -96,6 +96,9 @@ namespace {
  * 并在串口打印当前速度。
  */
 void motor_speed_control() {
+    // 普通局部变量: 每次循环重新计算的临时量
+    uint64_t now = millis();
+
     // 静态局部变量: 采样基线跨多次调用保持
     static uint64_t last_update_time = 0;  // 上一次更新时间
     static int64_t last_ticks[2] = {0, 0}; // 上一次读取的计数器数值
@@ -103,15 +106,14 @@ void motor_speed_control() {
 
     if (is_first_run) {
         // 初始化采样基线, 避免首次控制周期时间差过大
-        last_update_time = millis();
+        last_update_time = now;
         last_ticks[0] = encoders[0].getTicks();
         last_ticks[1] = encoders[1].getTicks();
         is_first_run = false;
     }
 
     // 普通局部变量: 每次调用重新计算的临时量
-    uint64_t now = millis();
-    uint64_t dt = now - last_update_time;
+    uint64_t dt = now - last_update_time;         // 计算时间差
     int32_t delta_ticks[2] = {0, 0};              // 两次读取之间的计数器差值
     float current_motor_speeds[2] = {0.0f, 0.0f}; // 当前两个电动机的速度, 单位 mm/s
 
@@ -128,8 +130,9 @@ void motor_speed_control() {
                                   static_cast<float>(dt) * MS_TO_S;
     }
 
-    // 更新上一次状态
+    // 更新上一次更新时间为当前时间
     last_update_time = now;
+    // 更新上一次编码器读数为当前编码器读数
     last_ticks[0] = encoders[0].getTicks();
     last_ticks[1] = encoders[1].getTicks();
 
