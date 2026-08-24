@@ -2,7 +2,7 @@
 
 ## 1. 库的作用
 
-PIDController 是 fishbot_motion_control(ESP32-S3, PlatformIO)项目中的位置式 PID 控制器库,为电机速度环提供闭环控制:
+PIDController 是 YuxiangROS-PIO-learning(ESP32-S3, PlatformIO)项目中的位置式 PID 控制器库,为电机速度环提供闭环控制:
 
 - **控制计算**:由目标值与当前值的误差,按比例、积分、微分三项求和得到控制输出(PWM 占空比)。
 - **限幅保护**:积分项限幅防止积分饱和,输出项限幅保护执行机构。
@@ -12,12 +12,14 @@ PIDController 是 fishbot_motion_control(ESP32-S3, PlatformIO)项目中的位置
 
 ## 2. 文件说明
 
-| 文件                         | 说明                                 |
-| ---------------------------- | ------------------------------------ |
-| `PIDController.h`            | 头文件,声明 `PIDController` 类       |
-| `PIDController.cpp`          | 实现文件,包含 PID 核心算法与状态管理 |
-| `docs/README.md`             | 本文档,库的使用说明                  |
-| `docs/OPTIMIZATION_NOTES.md` | 优化便签,记录库的历次优化与提交      |
+| 文件               | 说明                                 |
+| ------------------ | ------------------------------------ |
+| `PIDController.h`  | 头文件,声明 `PIDController` 类       |
+| `PIDController.cpp`| 实现文件,包含 PID 核心算法与状态管理 |
+| `docs/README.md`   | 本文档,库的使用说明                  |
+
+库的历次优化与提交记录已并入仓库根目录 [README.md](../../../README.md) 的
+"PIDController 控制器库优化（9 项）"章节。
 
 ## 3. 核心公式
 
@@ -38,15 +40,15 @@ output     = Kp * error + Ki * error_sum + Kd * d_error  (限幅于 ±output_lim
 
 ## 4. 公共接口
 
-| 方法                                                        | 说明                                                       |
-| ----------------------------------------------------------- | ---------------------------------------------------------- |
-| `PIDController()`                                           | 默认构造,全部成员类内初始化为 0,构造后即可安全使用         |
-| `PIDController(float kp, float ki, float kd)`               | 构造并设置 PID 系数,其余成员保持默认 0                     |
-| `int16_t update_pwm(float current)`                         | 输入当前值,返回 PWM 输出值(int16_t,范围 ±output_limit_,四舍五入取整) |
-| `void update_target(float target)`                          | 更新目标值                                                 |
-| `void update_pid(float kp, float ki, float kd)`             | 更新 PID 系数,不重置内部状态(如需重置请显式调用 `reset()`) |
-| `void reset()`                                              | 重置全部状态(目标值、输出限幅、系数、积分与微分历史)       |
-| `void output_limit(float limit)`                            | 设置输出限幅,对称限制在 [-limit, limit]                    |
+| 方法                                            | 说明                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| `PIDController()`                               | 默认构造,全部成员类内初始化为 0,构造后即可安全使用         |
+| `PIDController(float kp, float ki, float kd)`   | 构造并设置 PID 系数,其余成员保持默认 0                     |
+| `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)                   |
+| `void update_target(float target)`              | 更新目标值                                                 |
+| `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态(如需重置请显式调用 `reset()`) |
+| `void reset()`                                  | 重置全部状态(目标值、输出限幅、系数、积分与微分历史)       |
+| `void output_limit(float limit)`                | 设置输出限幅,对称限制在 [-limit, limit]                    |
 
 ## 5. 语法与设计特性
 
@@ -72,7 +74,9 @@ output     = Kp * error + Ki * error_sum + Kd * d_error  (限幅于 ±output_lim
 
 ### 四舍五入取整
 
-`update_pwm` 返回 `int16_t`,采用四舍五入而非直接截断:直接截断会让 `99.6 -> 99`,低速时占空比系统性偏小;四舍五入后 `99.6 -> 100`,负数同样处理。输出已限幅为 `±output_limit_`(远小于 int16_t 范围),转换无溢出风险。
+`update_pwm` 返回 `int16_t`,采用四舍五入而非直接截断:直接截断会让
+`99.6 -> 99`,低速时占空比系统性偏小;四舍五入后 `99.6 -> 100`,负数同样处理。
+输出已限幅为 `±output_limit_`(远小于 int16_t 范围),转换无溢出风险。
 
 ### 纯算法层,不依赖硬件
 

@@ -109,7 +109,7 @@ pio run -e esp32-s3 --target upload
 ### 2.5 src/ 子目录多固件隔离（build_src_filter + -e）
 
 > 参考项目：`~/Documents/PlatformIO_project/fishbot_motion_control`（鱼香ROS 书配套，
-> 尚未上传为 repo）
+> 仓库名 `YuxiangROS-PIO-learning`）
 
 **场景**：在 `src/` 下新建子目录写 demo（如 `src/wifi_test/main.cpp`），不动主程序 `src/main.cpp`。
 **坑**：`src/` 下同时存在两个 `setup()`/`loop()` 会符号重复定义，链接失败。

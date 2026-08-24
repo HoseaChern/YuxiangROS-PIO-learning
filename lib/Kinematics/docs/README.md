@@ -2,7 +2,7 @@
 
 ## 1. 库的作用
 
-Kinematics 是 fishbot_motion_control(ESP32-S3, PlatformIO)项目中的运动学计算库,为两轮差速机器人提供:
+Kinematics 是 YuxiangROS-PIO-learning(ESP32-S3, PlatformIO)项目中的运动学计算库,为两轮差速机器人提供:
 
 - **运动学正解**:由左右轮转速(电机转速)推算车体线速度与角速度,供里程计计算使用。
 - **运动学逆解**:由目标车体线速度与角速度推算左右轮目标转速,供运动控制(如 PID 速度环)下发。
@@ -12,12 +12,14 @@ Kinematics 是 fishbot_motion_control(ESP32-S3, PlatformIO)项目中的运动学
 
 ## 2. 文件说明
 
-| 文件                         | 说明                                            |
-| ---------------------------- | ----------------------------------------------- |
-| `Kinematics.h`               | 头文件,声明 `odom_t` 数据结构与 `Kinematics` 类 |
-| `Kinematics.cpp`             | 实现文件,包含正逆解、速度采样、里程计更新等实现 |
-| `docs/README.md`             | 本文档,库的使用说明                             |
-| `docs/OPTIMIZATION_NOTES.md` | 优化便签,记录库的历次优化与提交                 |
+| 文件             | 说明                                            |
+| ---------------- | ----------------------------------------------- |
+| `Kinematics.h`   | 头文件,声明 `odom_t` 数据结构与 `Kinematics` 类 |
+| `Kinematics.cpp` | 实现文件,包含正逆解、速度采样、里程计更新等实现 |
+| `docs/README.md` | 本文档,库的使用说明                             |
+
+库的历次优化与提交记录已并入仓库根目录 [README.md](../../../README.md) 的
+"Kinematics 运动学库优化（16 项）"章节。
 
 ## 3. 核心公式
 
@@ -90,7 +92,9 @@ yaw  += omega * dt
 
 ### 纯算法层,不依赖硬件
 
-`update_motor_speed` 接收 `const int32_t ticks[2]`(编码器读数数组)而非编码器对象。这样库保持纯算法,不反向依赖硬件层(同时规避了 `Esp32PcntEncoder::getTicks()` 非 const 与常量传参的冲突)。
+`update_motor_speed` 接收 `const int32_t ticks[2]`(编码器读数数组)而非编码器
+对象。这样库保持纯算法,不反向依赖硬件层(同时规避了
+`Esp32PcntEncoder::getTicks()` 非 const 与常量传参的冲突)。
 
 ### 方法内静态采样基线
 
