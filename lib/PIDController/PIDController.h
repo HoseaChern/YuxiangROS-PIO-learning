@@ -31,13 +31,11 @@ class PIDController {
     float error_last_ = 0.0f; // 上次误差
 
   public:
-    PIDController() = default;                   //默认构造函数
-    PIDController(float kp, float ki, float kd); // 构造函数, 传入PID系数
+    PIDController() = default; // 默认构造函数, 参数通过 update_pid() 设置
 
     int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
     void update_target(float target);  // 更新目标值
     void update_pid(float kp, float ki, float kd); // 更新PID系数, 不重置内部状态
-    void reset();                                  // 重置PID控制器
     void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]
 };
 

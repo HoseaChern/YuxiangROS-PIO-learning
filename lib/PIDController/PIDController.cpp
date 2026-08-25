@@ -5,9 +5,6 @@
 // C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
 constexpr float PIDController::INTEGRAL_SUP_LIMIT;
 
-// 构造函数: 成员已类内默认初始化, 初始化列表仅覆盖 PID 系数, 避免双重 reset
-PIDController::PIDController(float kp, float ki, float kd) : kp_(kp), ki_(ki), kd_(kd) {}
-
 /**
  * @brief 更新PID控制器, 核心算法实现
  * 
@@ -40,17 +37,6 @@ void PIDController::update_pid(float kp, float ki, float kd) {
     kp_ = kp;
     ki_ = ki;
     kd_ = kd;
-}
-
-void PIDController::reset() {
-    target_ = 0.0f;
-    output_limit_ = 0.0f;
-    kp_ = 0.0f;
-    ki_ = 0.0f;
-    kd_ = 0.0f;
-    error_last_ = 0.0f;
-    error_sum_ = 0.0f;
-    d_error_ = 0.0f;
 }
 
 void PIDController::output_limit(float limit) { output_limit_ = limit; }

@@ -6,7 +6,7 @@ PIDController 是 YuxiangROS-PIO-learning(ESP32-S3, PlatformIO)项目中的位�
 
 - **控制计算**:由目标值与当前值的误差,按比例、积分、微分三项求和得到控制输出(PWM 占空比)。
 - **限幅保护**:积分项限幅防止积分饱和,输出项限幅保护执行机构。
-- **参数与状态管理**:支持运行时更新目标值、调整 PID 系数、重置状态、设置输出限幅。
+- **参数与状态管理**:支持运行时更新目标值、调整 PID 系数、设置输出限幅;参数统一通过 `update_pid()` 设定。
 
 库为**纯算法层**,仅依赖 `<cstdint>` 与 `<cmath>`,不依赖 Arduino 头文件与硬件外设,便于单元测试与跨平台移植。
 
@@ -43,11 +43,9 @@ output     = Kp * error + Ki * error_sum + Kd * d_error  (限幅于 ±output_lim
 | 方法                                            | 说明                                                       |
 | ----------------------------------------------- | ---------------------------------------------------------- |
 | `PIDController()`                               | 默认构造,全部成员类内初始化为 0,构造后即可安全使用         |
-| `PIDController(float kp, float ki, float kd)`   | 构造并设置 PID 系数,其余成员保持默认 0                     |
 | `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)                   |
 | `void update_target(float target)`              | 更新目标值                                                 |
-| `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态(如需重置请显式调用 `reset()`) |
-| `void reset()`                                  | 重置全部状态(目标值、输出限幅、系数、积分与微分历史)       |
+| `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态                               |
 | `void output_limit(float limit)`                | 设置输出限幅,对称限制在 [-limit, limit]                    |
 
 ## 5. 语法与设计特性
@@ -96,6 +94,6 @@ int16_t pwm = pid.update_pwm(current_speed);
 
 ## 7. 注意事项
 
-- `update_pid()` 不重置内部状态;若调整系数后需要清零积分与微分历史,请显式调用 `reset()`。
+- `update_pid()` 不重置内部状态,积分与微分历史保留;对象为固件级静态实例,生命周期与固件相同,上电即全新,无需(也不存在)重置接口。
 - 微分项符号为"上次误差 - 当前误差"(误差变化率取负),调参时注意 `Kd` 符号与标准公式的差异。
 - 构造后需先调用 `output_limit()` 设置输出限幅,否则输出恒为 0(默认 `output_limit_ = 0.0f`)。
