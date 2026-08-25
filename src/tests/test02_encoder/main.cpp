@@ -8,12 +8,12 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
+// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
 
-constexpr uint8_t ENC_LEFT_PIN_A = 15;
-constexpr uint8_t ENC_LEFT_PIN_B = 16;
-constexpr uint8_t ENC_RIGHT_PIN_A = 18;
-constexpr uint8_t ENC_RIGHT_PIN_B = 17;
+constexpr uint8_t ENC_LEFT_PIN_A = 16;
+constexpr uint8_t ENC_LEFT_PIN_B = 15;
+constexpr uint8_t ENC_RIGHT_PIN_A = 17;
+constexpr uint8_t ENC_RIGHT_PIN_B = 18;
 
 // ---- 测试参数 ----
 

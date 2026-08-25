@@ -31,19 +31,19 @@ namespace {
 
 constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
 
-// ---- 电机引脚 (电机0: 4/5, 电机1: 7/6) ----
+// ---- 电机引脚 (电机0: 5/4, 电机1: 6/7) ----
 
-constexpr uint8_t MOTOR_LEFT_PIN_A = 4;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 5;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 7;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 6;
+constexpr uint8_t MOTOR_LEFT_PIN_A = 5;
+constexpr uint8_t MOTOR_LEFT_PIN_B = 4;
+constexpr uint8_t MOTOR_RIGHT_PIN_A = 6;
+constexpr uint8_t MOTOR_RIGHT_PIN_B = 7;
 
-// ---- 编码器引脚 (编码器0: 15/16, 编码器1: 18/17) ----
+// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
 
-constexpr uint8_t ENC_LEFT_PIN_A = 15;
-constexpr uint8_t ENC_LEFT_PIN_B = 16;
-constexpr uint8_t ENC_RIGHT_PIN_A = 18;
-constexpr uint8_t ENC_RIGHT_PIN_B = 17;
+constexpr uint8_t ENC_LEFT_PIN_A = 16;
+constexpr uint8_t ENC_LEFT_PIN_B = 15;
+constexpr uint8_t ENC_RIGHT_PIN_A = 17;
+constexpr uint8_t ENC_RIGHT_PIN_B = 18;
 
 // ---- PID 参数 ----
 
@@ -89,9 +89,9 @@ constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, �
 
 // ---- 订阅参数 ----
 
-constexpr uint8_t EXECUTOR_HANDLES = 2;                 // 执行器句柄数(速度订阅+里程计定时器)
-constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";            // 速度指令话题名
-constexpr char NODE_NAME[] = "fishbot_motion_control";  // 节点名
+constexpr uint8_t EXECUTOR_HANDLES = 2;                // 执行器句柄数(速度订阅+里程计定时器)
+constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";           // 速度指令话题名
+constexpr char NODE_NAME[] = "fishbot_motion_control"; // 节点名
 
 // ---- 发布参数 ----
 
@@ -215,8 +215,9 @@ void odom_callback(rcl_timer_t* timer, int64_t last_call_time) {
     odom_t odom = kinematics.get_odom();     // 获取里程计
     int64_t stamp = rmw_uros_epoch_millis(); // 获取当前时间
 
-    pub_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000);                // 秒部分
-    pub_msg.header.stamp.nanosec = static_cast<uint32_t>(stamp % 1000) * static_cast<uint32_t>(S_TO_NS); // 纳秒部分
+    pub_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000); // 秒部分
+    pub_msg.header.stamp.nanosec =
+        static_cast<uint32_t>(stamp % 1000) * static_cast<uint32_t>(S_TO_NS); // 纳秒部分
 
     // 设置里程计消息
     pub_msg.pose.pose.position.x = odom.x;

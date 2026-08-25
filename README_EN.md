@@ -83,8 +83,8 @@ buildable projects, one-to-one:
 
 | Device    | Left (Motor/Encoder 0) | Right (Motor/Encoder 1) |
 | --------- | ---------------------- | ----------------------- |
-| Motor PWM | GPIO 4 / 5             | GPIO 7 / 6              |
-| Encoder   | GPIO 15 / 16           | GPIO 18 / 17            |
+| Motor PWM | GPIO 5 / 4             | GPIO 6 / 7              |
+| Encoder   | GPIO 16 / 15           | GPIO 17 / 18            |
 
 | Item            | Configuration                                                 |
 | --------------- | ------------------------------------------------------------- |
