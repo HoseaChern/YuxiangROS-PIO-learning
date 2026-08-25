@@ -33,10 +33,10 @@ class PIDController {
   public:
     PIDController() = default; // 默认构造函数, 参数通过 update_pid() 设置
 
-    int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
-    void update_target(float target);  // 更新目标值
     void update_pid(float kp, float ki, float kd); // 更新PID系数, 不重置内部状态
     void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]
+    void update_target(float target);              // 更新目标值
+    int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
 };
 
 #endif // PIDCONTROLLER_H

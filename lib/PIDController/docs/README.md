@@ -43,10 +43,10 @@ output     = Kp * error + Ki * error_sum + Kd * d_error  (限幅于 ±output_lim
 | 方法                                            | 说明                                                       |
 | ----------------------------------------------- | ---------------------------------------------------------- |
 | `PIDController()`                               | 默认构造,全部成员类内初始化为 0,构造后即可安全使用         |
-| `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)                   |
-| `void update_target(float target)`              | 更新目标值                                                 |
 | `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态                               |
 | `void output_limit(float limit)`                | 设置输出限幅,对称限制在 [-limit, limit]                    |
+| `void update_target(float target)`              | 更新目标值                                                 |
+| `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)                   |
 
 ## 5. 语法与设计特性
 

@@ -67,13 +67,13 @@ yaw  += omega * dt
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `set_motor_param(float distance_per_tick_mm)`                               | 设置标定参数:单个编码器脉冲对应的轮子前进距离(mm),两轮共用           |
 | `set_wheel_distance(float wheel_distance)`                                  | 设置轮间距(mm)                                                       |
+| `update_motor_speed(uint64_t now, const int32_t ticks[2])`                  | 编码器采样:输入当前时间(ms)与左右编码器读数,内部计算速度并自动刷新里程计 |
 | `kinematics_forward(const float motor_speeds[2], float body_velocities[2])` | 运动学正解:电机转速 -> 车体速度,仅用于里程计内部计算                 |
 | `kinematics_inverse(const float body_velocities[2], float motor_speeds[2])` | 运动学逆解:车体速度 -> 电机目标转速                                  |
-| `update_motor_speed(uint64_t now, const int32_t ticks[2])`                  | 编码器采样:输入当前时间(ms)与左右编码器读数,内部计算速度并自动刷新里程计 |
-| `get_motor_speed(uint8_t motor_id) const`                                   | 获取电机当前速度(mm/s),`motor_id`: 0=左, 1=右                        |
+| `get_motor_speed(MotorID motor_id) const`                                   | 获取电机当前速度(mm/s),`motor_id`: MOTOR_LEFT=左, MOTOR_RIGHT=右     |
 | `get_odom()` / `get_odom() const`                                           | 获取里程计数据,提供可写与只读两种重载                                |
 
-> 说明:`update_odom` 与角度归一化 `TransAngleInPI` 为类私有实现细节,由
+> 说明:`update_odom_` 与角度归一化 `trans_angle_in_pi_` 为类私有实现细节,由
 > `update_motor_speed` 每周期自动驱动,不对外暴露。
 
 ### 数组参数约定
@@ -135,7 +135,7 @@ static bool     is_first_run     = true;
 | 角速度 `angular_velocity`                      | rad/s |
 | 时间参数 `now`/`dt`                            | ms    |
 
-`MS_TO_S = 1000.0f` 为 ms 与 s 的换算系数;速度在采样处统一换算为 mm/s,里程计积分前再换算为 m/s(注:当前实现 `linear_velocity` 仍以 mm/s 存储,`update_odom` 内换算后用于积分)。
+`MS_TO_S = 1000.0f` 为 ms 与 s 的换算系数;速度在采样处统一换算为 mm/s,里程计积分前再换算为 m/s(注:当前实现 `linear_velocity` 仍以 mm/s 存储,`update_odom_` 内换算后用于积分)。
 
 ## 7. 使用示例
 

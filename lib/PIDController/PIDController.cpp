@@ -5,6 +5,16 @@
 // C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
 constexpr float PIDController::INTEGRAL_SUP_LIMIT;
 
+void PIDController::update_pid(float kp, float ki, float kd) {
+    kp_ = kp;
+    ki_ = ki;
+    kd_ = kd;
+}
+
+void PIDController::output_limit(float limit) { output_limit_ = limit; }
+
+void PIDController::update_target(float target) { target_ = target; }
+
 /**
  * @brief 更新PID控制器, 核心算法实现
  * 
@@ -30,13 +40,3 @@ int16_t PIDController::update_pwm(float current) {
     // 限幅为 ±output_limit_ (远小于 int16_t 范围), 此转换无溢出风险。
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
 }
-
-void PIDController::update_target(float target) { target_ = target; }
-
-void PIDController::update_pid(float kp, float ki, float kd) {
-    kp_ = kp;
-    ki_ = ki;
-    kd_ = kd;
-}
-
-void PIDController::output_limit(float limit) { output_limit_ = limit; }

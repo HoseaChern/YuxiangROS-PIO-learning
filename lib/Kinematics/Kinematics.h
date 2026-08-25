@@ -41,17 +41,16 @@ class Kinematics {
     float wheel_distance_;          // 轮子间距, 单位 mm
     odom_t odom_;                   // 存储里程计参数
 
-    // 内部实现细节: 里程计随 update_motor_speed 每周期自动刷新, 无需外部调用
-    void update_odom(uint64_t dt); // 更新里程计数据
-    // 内部实现细节: 角度归一化, 里程计累积的中间步骤
-    static void TransAngleInPI(float& angle); // 将角度归一化到[-PI, PI]
-
   public:
     Kinematics() = default;  // 默认构造函数
     ~Kinematics() = default; // 默认析构函数
 
     void set_motor_param(float distance_per_tick_mm); // 设置电机参数
     void set_wheel_distance(float wheel_distance);    // 设置轮子间距
+
+    // 更新电机速度和编码器数据
+    // ticks: [MOTOR_LEFT]=左编码器, [MOTOR_RIGHT]=右编码器
+    void update_motor_speed(uint64_t now, const int32_t ticks[2]);
 
     // 运动学正解: 电机转速 -> 车体速度, 仅用于里程计计算
     // motor_speeds: [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
@@ -62,13 +61,16 @@ class Kinematics {
     // motor_speeds: [MOTOR_LEFT]=左电机, [MOTOR_RIGHT]=右电机, 单位 mm/s
     void kinematics_inverse(const float body_velocities[2], float motor_speeds[2]);
 
-    // 更新电机速度和编码器数据
-    // ticks: [MOTOR_LEFT]=左编码器, [MOTOR_RIGHT]=右编码器
-    void update_motor_speed(uint64_t now, const int32_t ticks[2]);
     float get_motor_speed(MotorID motor_id) const; // 获取电机速度
 
     odom_t& get_odom();             // 获取里程计数据 (可写)
     const odom_t& get_odom() const; // 获取里程计数据 (只读)
+
+  private:
+    // 内部实现细节: 里程计随 update_motor_speed 每周期自动刷新, 无需外部调用
+    void update_odom_(uint64_t dt); // 更新里程计数据
+    // 内部实现细节: 角度归一化, 里程计累积的中间步骤
+    static void trans_angle_in_pi_(float& angle); // 将角度归一化到[-PI, PI]
 };
 
 #endif // KINEMATICS_H
