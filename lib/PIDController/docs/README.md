@@ -12,11 +12,11 @@ PIDController 是 YuxiangROS-PIO-learning(ESP32-S3, PlatformIO)项目中的位�
 
 ## 2. 文件说明
 
-| 文件               | 说明                                 |
-| ------------------ | ------------------------------------ |
-| `PIDController.h`  | 头文件,声明 `PIDController` 类       |
-| `PIDController.cpp`| 实现文件,包含 PID 核心算法与状态管理 |
-| `docs/README.md`   | 本文档,库的使用说明                  |
+| 文件                | 说明                                 |
+| ------------------- | ------------------------------------ |
+| `PIDController.h`   | 头文件,声明 `PIDController` 类       |
+| `PIDController.cpp` | 实现文件,包含 PID 核心算法与状态管理 |
+| `docs/README.md`    | 本文档,库的使用说明                  |
 
 库的历次优化与提交记录已并入仓库根目录 [README.md](../../../README.md) 的
 "PIDController 控制器库优化（9 项）"章节。
@@ -40,13 +40,13 @@ output     = Kp * error + Ki * error_sum + Kd * d_error  (限幅于 ±output_lim
 
 ## 4. 公共接口
 
-| 方法                                            | 说明                                                       |
-| ----------------------------------------------- | ---------------------------------------------------------- |
-| `PIDController()`                               | 默认构造,全部成员类内初始化为 0,构造后即可安全使用         |
-| `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态                               |
-| `void output_limit(float limit)`                | 设置输出限幅,对称限制在 [-limit, limit]                    |
-| `void update_target(float target)`              | 更新目标值                                                 |
-| `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)                   |
+| 方法                                            | 说明                                               |
+| ----------------------------------------------- | -------------------------------------------------- |
+| `PIDController()`                               | 默认构造,全部成员类内初始化为 0,构造后即可安全使用 |
+| `void update_pid(float kp, float ki, float kd)` | 更新 PID 系数,不重置内部状态                       |
+| `void output_limit(float limit)`                | 设置输出限幅,对称限制在 [-limit, limit]            |
+| `void update_target(float target)`              | 更新目标值                                         |
+| `int16_t update_pwm(float current)`             | 输入当前值,返回 PWM 输出值(四舍五入取整)           |
 
 ## 5. 语法与设计特性
 

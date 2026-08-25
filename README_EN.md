@@ -17,18 +17,21 @@
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Correspondence with the Book](#correspondence-with-the-book)
-- [Hardware and Pinout](#hardware-and-pinout)
-- [platformio.ini Design](#platformioini-design)
-- [Directory Structure](#directory-structure)
-- [Dependencies](#dependencies)
-- [Build and Upload](#build-and-upload)
-- [Running and Integration](#running-and-integration)
-- [Optimizations](#optimizations)
-- [Development Environment](#development-environment)
-- [Acknowledgements and References](#acknowledgements-and-references)
-- [License](#license)
+- [YuxiangROS-PIO-learning](#yuxiangros-pio-learning)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Correspondence with the Book](#correspondence-with-the-book)
+  - [Hardware and Pinout](#hardware-and-pinout)
+  - [platformio.ini Design](#platformioini-design)
+  - [Directory Structure](#directory-structure)
+  - [Dependencies](#dependencies)
+  - [Build and Upload](#build-and-upload)
+  - [Running and Integration](#running-and-integration)
+  - [Optimizations](#optimizations)
+  - [Development Environment](#development-environment)
+    - [Generating compile\_commands.json (12 Envs Merged)](#generating-compile_commandsjson-12-envs-merged)
+  - [Acknowledgements and References](#acknowledgements-and-references)
+  - [License](#license)
 
 ## Overview
 
@@ -57,20 +60,20 @@ per-section code blocks, and each section directly modifies the previous
 section's code.** This repo slices those code blocks into independently
 buildable projects, one-to-one:
 
-| Book section (code block)        | This repo's slice project          | What is verified                |
-| -------------------------------- | ---------------------------------- | ------------------------------- |
-| 9.2.2 first Hello World project  | `examples/example01_helloworld`    | serial Hello World              |
-| 9.2.3 blinking an LED with code  | `examples/example02_LED`           | GPIO output, LED blink          |
-| 9.2.4 ultrasonic ranging         | `examples/example03_Ultrasound`    | ultrasonic sensor reading       |
-| 9.2.5 driving an IMU with a lib  | `examples/example04_IMU`           | MPU6050 attitude estimation     |
-| 9.3.1 driving multiple motors    | `tests/test01_motor`               | MCPWM motor driving             |
-| 9.3.2 motor speed measurement & conversion | `tests/test02_encoder`, `tests/test03_speed_trans` | encoder reading, speed conversion |
-| 9.3.3 PID speed control          | `tests/test04_PID`                 | PID velocity loop               |
-| 9.3.4 forward/inverse kinematics | `tests/test05_Kinematics`          | inverse kinematics + PID        |
-| 9.3.5 odometry computation       | main firmware `src/main.cpp` (odometry part) | odometry integration  |
-| 9.4.1 the first node             | `tests/test06_wifi`                | micro-ROS WiFi connection       |
-| 9.4.2 subscribing to control the robot | `tests/test07_Subscription`   | `/cmd_vel` subscription + motion control |
-| 9.4.3 publishing the odometry topic | main firmware `src/main.cpp`    | `/odom` publishing + full integration |
+| Book section (code block)                  | This repo's slice project                          | What is verified                         |
+| ------------------------------------------ | -------------------------------------------------- | ---------------------------------------- |
+| 9.2.2 first Hello World project            | `examples/example01_helloworld`                    | serial Hello World                       |
+| 9.2.3 blinking an LED with code            | `examples/example02_LED`                           | GPIO output, LED blink                   |
+| 9.2.4 ultrasonic ranging                   | `examples/example03_Ultrasound`                    | ultrasonic sensor reading                |
+| 9.2.5 driving an IMU with a lib            | `examples/example04_IMU`                           | MPU6050 attitude estimation              |
+| 9.3.1 driving multiple motors              | `tests/test01_motor`                               | MCPWM motor driving                      |
+| 9.3.2 motor speed measurement & conversion | `tests/test02_encoder`, `tests/test03_speed_trans` | encoder reading, speed conversion        |
+| 9.3.3 PID speed control                    | `tests/test04_PID`                                 | PID velocity loop                        |
+| 9.3.4 forward/inverse kinematics           | `tests/test05_Kinematics`                          | inverse kinematics + PID                 |
+| 9.3.5 odometry computation                 | main firmware `src/main.cpp` (odometry part)       | odometry integration                     |
+| 9.4.1 the first node                       | `tests/test06_wifi`                                | micro-ROS WiFi connection                |
+| 9.4.2 subscribing to control the robot     | `tests/test07_Subscription`                        | `/cmd_vel` subscription + motion control |
+| 9.4.3 publishing the odometry topic        | main firmware `src/main.cpp`                       | `/odom` publishing + full integration    |
 
 > Note: 9.2.1 (platform introduction) involves no code; 9.3.2 covers both "speed
 > measurement" and "speed conversion", hence two slices; the main firmware is the
@@ -78,18 +81,18 @@ buildable projects, one-to-one:
 
 ## Hardware and Pinout
 
-| Device       | Left (Motor/Encoder 0) | Right (Motor/Encoder 1) |
-| ------------ | ---------------------- | ----------------------- |
-| Motor PWM    | GPIO 4 / 5             | GPIO 7 / 6              |
-| Encoder      | GPIO 15 / 16           | GPIO 18 / 17            |
+| Device    | Left (Motor/Encoder 0) | Right (Motor/Encoder 1) |
+| --------- | ---------------------- | ----------------------- |
+| Motor PWM | GPIO 4 / 5             | GPIO 7 / 6              |
+| Encoder   | GPIO 15 / 16           | GPIO 18 / 17            |
 
-| Item              | Configuration                                                    |
-| ----------------- | ---------------------------------------------------------------- |
-| MCU               | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)               |
-| Motor driver      | `Esp32McpwmMotor` (MCPWM)                                        |
-| Encoder reading   | `Esp32PcntEncoder` (PCNT pulse counting)                         |
-| Communication     | micro-ROS over WiFi (UDP), default Agent `192.168.2.120:8888`    |
-| Control period    | 10 ms main loop, 50 ms odometry publishing                       |
+| Item            | Configuration                                                 |
+| --------------- | ------------------------------------------------------------- |
+| MCU             | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)            |
+| Motor driver    | `Esp32McpwmMotor` (MCPWM)                                     |
+| Encoder reading | `Esp32PcntEncoder` (PCNT pulse counting)                      |
+| Communication   | micro-ROS over WiFi (UDP), default Agent `192.168.2.120:8888` |
+| Control period  | 10 ms main loop, 50 ms odometry publishing                    |
 
 > Hardware note: the book uses an Adafruit Feather board; this repo uses an
 > ESP32-S3-DevKitC-1 instead. The firmware is decoupled from the board, so
@@ -98,9 +101,7 @@ buildable projects, one-to-one:
 
 ## platformio.ini Design
 
-`platformio.ini` is the core configuration: 12 environments (1 main + 4 examples
-+ 7 tests), each example/test only compiles its own `main.cpp`, independent of
-the main firmware. Key points:
+`platformio.ini` is the core configuration: 12 environments (1 main + 4 examples + 7 tests), each example/test only compiles its own `main.cpp`, independent of the main firmware. Key points:
 
 - **`build_src_filter` isolation**: the main firmware uses `+<*> -<examples>
   -<tests>`; each example/test keeps only its own directory. Otherwise the
@@ -154,12 +155,12 @@ YuxiangROS-PIO-learning/
 
 ## Dependencies
 
-| Library               | Purpose                 | Source                                     | Used by                            |
-| --------------------- | ----------------------- | ------------------------------------------ | ---------------------------------- |
-| Esp32McpwmMotor       | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)   | main, test01/03/04/05/06/07 |
-| Esp32PcntEncoder      | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)  | main, test02/03/04/05/06/07 |
-| micro_ros_platformio  | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07        |
-| MPU6050_light         | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)      | example04                          |
+| Library              | Purpose                 | Source                                                              | Used by                     |
+| -------------------- | ----------------------- | ------------------------------------------------------------------- | --------------------------- |
+| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07 |
+| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07 |
+| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07             |
+| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04                   |
 
 > Why the fishros prebuilt mirror: the official
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -182,20 +183,20 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| Type   | Environment           | Description                                      |
-| ------ | --------------------- | ------------------------------------------------ |
-| Main   | esp32-s3-devkitc-1    | motion control + micro-ROS (`/cmd_vel` -> `/odom`) |
-| Example| example01_helloworld  | Hello World                                      |
-| Example| example02_LED         | LED blink                                        |
-| Example| example03_Ultrasound  | ultrasonic ranging                               |
-| Example| example04_IMU         | MPU6050 attitude estimation                      |
-| Test   | test01_motor          | motor driver test                                |
-| Test   | test02_encoder        | encoder reading and calibration                  |
-| Test   | test03_speed_trans    | speed conversion test                            |
-| Test   | test04_PID            | PID velocity loop test                           |
-| Test   | test05_Kinematics     | inverse kinematics + PID control test            |
-| Test   | test06_wifi           | micro-ROS WiFi connection test                   |
-| Test   | test07_Subscription   | `/cmd_vel` subscription + motion control test    |
+| Type    | Environment          | Description                                        |
+| ------- | -------------------- | -------------------------------------------------- |
+| Main    | esp32-s3-devkitc-1   | motion control + micro-ROS (`/cmd_vel` -> `/odom`) |
+| Example | example01_helloworld | Hello World                                        |
+| Example | example02_LED        | LED blink                                          |
+| Example | example03_Ultrasound | ultrasonic ranging                                 |
+| Example | example04_IMU        | MPU6050 attitude estimation                        |
+| Test    | test01_motor         | motor driver test                                  |
+| Test    | test02_encoder       | encoder reading and calibration                    |
+| Test    | test03_speed_trans   | speed conversion test                              |
+| Test    | test04_PID           | PID velocity loop test                             |
+| Test    | test05_Kinematics    | inverse kinematics + PID control test              |
+| Test    | test06_wifi          | micro-ROS WiFi connection test                     |
+| Test    | test07_Subscription  | `/cmd_vel` subscription + motion control test      |
 
 ## Running and Integration
 
@@ -248,11 +249,11 @@ the original mainly in code quality:
 Three layers, each independent: "PIO cross-compilation + LLVM development
 surface + gdb debugging".
 
-| Layer            | Tool                          | Responsibility                 |
-| ---------------- | ----------------------------- | ------------------------------ |
-| Compile layer    | xtensa-esp32s3-elf-g++ (gcc)  | sole production build path     |
-| Dev surface      | clangd / clang-format         | IntelliSense, formatting       |
-| Debug layer      | platformio-debug (gdb)        | `pio debug` (OpenOCD + gdb)    |
+| Layer         | Tool                         | Responsibility              |
+| ------------- | ---------------------------- | --------------------------- |
+| Compile layer | xtensa-esp32s3-elf-g++ (gcc) | sole production build path  |
+| Dev surface   | clangd / clang-format        | IntelliSense, formatting    |
+| Debug layer   | platformio-debug (gdb)       | `pio debug` (OpenOCD + gdb) |
 
 Rationale (differences from common alternatives):
 
@@ -301,12 +302,12 @@ Key points:
 
 Common problems:
 
-| Symptom                              | Handling                                                    |
-| ------------------------------------ | ----------------------------------------------------------- |
-| clangd: driver not found in PATH     | `.clangd` accidentally has `Compiler:`; remove it           |
-| `uint32_t` etc. all unknown          | compile_commands.json missing or relative compiler; regenerate |
-| clang-tidy inactive                  | confirm `--clang-tidy` and the root `.clang-tidy`           |
-| cannot debug with CodeLLDB           | no Xtensa LLDB support; use CLI `pio debug` (OpenOCD + gdb) |
+| Symptom                          | Handling                                                       |
+| -------------------------------- | -------------------------------------------------------------- |
+| clangd: driver not found in PATH | `.clangd` accidentally has `Compiler:`; remove it              |
+| `uint32_t` etc. all unknown      | compile_commands.json missing or relative compiler; regenerate |
+| clang-tidy inactive              | confirm `--clang-tidy` and the root `.clang-tidy`              |
+| cannot debug with CodeLLDB       | no Xtensa LLDB support; use CLI `pio debug` (OpenOCD + gdb)    |
 
 ## Acknowledgements and References
 

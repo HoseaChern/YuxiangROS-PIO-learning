@@ -13,18 +13,21 @@
 
 ## 目录
 
-- [项目简介](#项目简介)
-- [与原书的对应关系](#与原书的对应关系)
-- [硬件与引脚](#硬件与引脚)
-- [platformio.ini 关键设计](#platformioini-关键设计)
-- [目录结构](#目录结构)
-- [依赖库](#依赖库)
-- [编译与烧录](#编译与烧录)
-- [运行与联调](#运行与联调)
-- [自主优化](#自主优化)
-- [开发环境](#开发环境)
-- [致谢与参考](#致谢与参考)
-- [许可证](#许可证)
+- [YuxiangROS-PIO-learning](#yuxiangros-pio-learning)
+  - [目录](#目录)
+  - [项目简介](#项目简介)
+  - [与原书的对应关系](#与原书的对应关系)
+  - [硬件与引脚](#硬件与引脚)
+  - [platformio.ini 关键设计](#platformioini-关键设计)
+  - [目录结构](#目录结构)
+  - [依赖库](#依赖库)
+  - [编译与烧录](#编译与烧录)
+  - [运行与联调](#运行与联调)
+  - [自主优化](#自主优化)
+  - [开发环境](#开发环境)
+    - [compile\_commands.json 生成（12 环境合并）](#compile_commandsjson-生成12-环境合并)
+  - [致谢与参考](#致谢与参考)
+  - [许可证](#许可证)
 
 ## 项目简介
 
@@ -46,20 +49,20 @@
 （9.4）。**原书下位机代码以"一小节的代码块"散落书中，每小节直接在上小节基础上改，
 没有整合的 PIO 工程**。本仓库把这些代码块切片为独立可编译工程，一一对应：
 
-| 原书小节（代码块）           | 本仓库切片工程                  | 验证内容                 |
-| ---------------------------- | ------------------------------- | ------------------------ |
-| 9.2.2 第一个 Hello World 工程 | `examples/example01_helloworld` | 串口 Hello World        |
-| 9.2.3 使用代码点亮 LED 灯     | `examples/example02_LED`        | GPIO 输出、LED 闪烁     |
-| 9.2.4 使用超声波测量距离       | `examples/example03_Ultrasound` | 超声波传感器读取        |
-| 9.2.5 使用开源库驱动 IMU       | `examples/example04_IMU`        | MPU6050 姿态解算        |
-| 9.3.1 使用开源库驱动多路电动机 | `tests/test01_motor`            | MCPWM 电机驱动          |
-| 9.3.2 电动机速度测量与转换     | `tests/test02_encoder`、`tests/test03_speed_trans` | 编码器读数、速度换算 |
-| 9.3.3 使用 PID 控制轮子转速    | `tests/test04_PID`              | PID 速度闭环            |
-| 9.3.4 运动学正逆解的实现       | `tests/test05_Kinematics`       | 逆解 + PID 综合控制     |
-| 9.3.5 机器人里程计计算         | 主固件 `src/main.cpp`（里程计部分） | 里程计积分           |
-| 9.4.1 第一个节点               | `tests/test06_wifi`             | micro-ROS WiFi 连接     |
-| 9.4.2 订阅话题控制机器人       | `tests/test07_Subscription`     | `/cmd_vel` 订阅 + 运动控制 |
-| 9.4.3 发布机器人里程计话题     | 主固件 `src/main.cpp`           | `/odom` 发布 + 全流程集成 |
+| 原书小节（代码块）             | 本仓库切片工程                                     | 验证内容                   |
+| ------------------------------ | -------------------------------------------------- | -------------------------- |
+| 9.2.2 第一个 Hello World 工程  | `examples/example01_helloworld`                    | 串口 Hello World           |
+| 9.2.3 使用代码点亮 LED 灯      | `examples/example02_LED`                           | GPIO 输出、LED 闪烁        |
+| 9.2.4 使用超声波测量距离       | `examples/example03_Ultrasound`                    | 超声波传感器读取           |
+| 9.2.5 使用开源库驱动 IMU       | `examples/example04_IMU`                           | MPU6050 姿态解算           |
+| 9.3.1 使用开源库驱动多路电动机 | `tests/test01_motor`                               | MCPWM 电机驱动             |
+| 9.3.2 电动机速度测量与转换     | `tests/test02_encoder`、`tests/test03_speed_trans` | 编码器读数、速度换算       |
+| 9.3.3 使用 PID 控制轮子转速    | `tests/test04_PID`                                 | PID 速度闭环               |
+| 9.3.4 运动学正逆解的实现       | `tests/test05_Kinematics`                          | 逆解 + PID 综合控制        |
+| 9.3.5 机器人里程计计算         | 主固件 `src/main.cpp`（里程计部分）                | 里程计积分                 |
+| 9.4.1 第一个节点               | `tests/test06_wifi`                                | micro-ROS WiFi 连接        |
+| 9.4.2 订阅话题控制机器人       | `tests/test07_Subscription`                        | `/cmd_vel` 订阅 + 运动控制 |
+| 9.4.3 发布机器人里程计话题     | 主固件 `src/main.cpp`                              | `/odom` 发布 + 全流程集成  |
 
 > 说明：9.2.1（平台介绍）不涉及代码；9.3.2 同时覆盖"速度测量"与"速度转换"两段代码，
 > 故映射两个切片；主固件是 9.3.5 与 9.4.3 的收敛（内嵌里程计 + 发布 `/odom`）。
@@ -136,12 +139,12 @@ YuxiangROS-PIO-learning/
 
 ## 依赖库
 
-| 库                   | 用途            | 来源                                                                | 使用环境                        |
-| -------------------- | --------------- | ------------------------------------------------------------------- | ------------------------------- |
-| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | 主环境、test01/03/04/05/06/07   |
-| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | 主环境、test02/03/04/05/06/07   |
-| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版）| 主环境、test06/07               |
-| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04                       |
+| 库                   | 用途            | 来源                                                                 | 使用环境                      |
+| -------------------- | --------------- | -------------------------------------------------------------------- | ----------------------------- |
+| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07 |
+| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07 |
+| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07             |
+| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04                     |
 
 > 为何用 fishros 预编译镜像：官方
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -164,20 +167,20 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| 类型 | 环境名                | 说明                                              |
-| ---- | --------------------- | ------------------------------------------------- |
+| 类型   | 环境名               | 说明                                                  |
+| ------ | -------------------- | ----------------------------------------------------- |
 | 主固件 | esp32-s3-devkitc-1   | 运动控制 + micro-ROS（订阅 `/cmd_vel`，发布 `/odom`） |
-| 示例 | example01_helloworld  | Hello World                                       |
-| 示例 | example02_LED         | LED 闪烁                                          |
-| 示例 | example03_Ultrasound  | 超声波测距                                        |
-| 示例 | example04_IMU         | MPU6050 姿态解算                                  |
-| 测试 | test01_motor          | 电机驱动测试                                      |
-| 测试 | test02_encoder        | 编码器读取与标定                                  |
-| 测试 | test03_speed_trans    | 速度换算测试                                      |
-| 测试 | test04_PID            | PID 速度闭环测试                                  |
-| 测试 | test05_Kinematics     | 运动学逆解 + PID 控制测试                         |
-| 测试 | test06_wifi           | micro-ROS WiFi 连接测试                           |
-| 测试 | test07_Subscription   | `/cmd_vel` 订阅 + 运动控制测试                    |
+| 示例   | example01_helloworld | Hello World                                           |
+| 示例   | example02_LED        | LED 闪烁                                              |
+| 示例   | example03_Ultrasound | 超声波测距                                            |
+| 示例   | example04_IMU        | MPU6050 姿态解算                                      |
+| 测试   | test01_motor         | 电机驱动测试                                          |
+| 测试   | test02_encoder       | 编码器读取与标定                                      |
+| 测试   | test03_speed_trans   | 速度换算测试                                          |
+| 测试   | test04_PID           | PID 速度闭环测试                                      |
+| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                             |
+| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                               |
+| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                        |
 
 ## 运行与联调
 
@@ -220,11 +223,11 @@ pio run -e test01_motor -t upload
 
 采用"PIO 交叉编译 + LLVM 开发表层 + gdb 调试"三层结构，各层职责独立：
 
-| 层      | 工具                          | 职责                          |
-| ------- | ----------------------------- | ----------------------------- |
-| 编译层  | xtensa-esp32s3-elf-g++ (gcc)  | 唯一生产编译路径，产出固件    |
-| 开发表层 | clangd / clang-format         | 智能提示、格式化              |
-| 调试层  | platformio-debug (gdb)        | `pio debug`（OpenOCD + gdb）  |
+| 层       | 工具                         | 职责                         |
+| -------- | ---------------------------- | ---------------------------- |
+| 编译层   | xtensa-esp32s3-elf-g++ (gcc) | 唯一生产编译路径，产出固件   |
+| 开发表层 | clangd / clang-format        | 智能提示、格式化             |
+| 调试层   | platformio-debug (gdb)       | `pio debug`（OpenOCD + gdb） |
 
 选择依据（与常见替代品的区别）：
 
@@ -267,12 +270,12 @@ python3 tools/merge_ccdb.py
 
 常见问题速查：
 
-| 现象                              | 处理                                                        |
-| --------------------------------- | ----------------------------------------------------------- |
-| clangd 报 driver not found        | `.clangd` 误写 `Compiler:`，删除该字段                      |
-| `uint32_t` 等类型全报 unknown     | compile_commands.json 缺失或编译器为相对名，重跑生成步骤    |
-| clang-tidy 未生效                 | 确认 `--clang-tidy` 参数与根目录 `.clang-tidy`              |
-| 调试无法用 CodeLLDB               | Xtensa 无 LLDB 支持，改用 CLI `pio debug`（OpenOCD + gdb）  |
+| 现象                          | 处理                                                       |
+| ----------------------------- | ---------------------------------------------------------- |
+| clangd 报 driver not found    | `.clangd` 误写 `Compiler:`，删除该字段                     |
+| `uint32_t` 等类型全报 unknown | compile_commands.json 缺失或编译器为相对名，重跑生成步骤   |
+| clang-tidy 未生效             | 确认 `--clang-tidy` 参数与根目录 `.clang-tidy`             |
+| 调试无法用 CodeLLDB           | Xtensa 无 LLDB 支持，改用 CLI `pio debug`（OpenOCD + gdb） |
 
 ## 致谢与参考
 
