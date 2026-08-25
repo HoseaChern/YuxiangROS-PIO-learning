@@ -283,21 +283,7 @@ for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            test07_Subscription; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
-export TOOLCHAIN="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin"
-python3 - <<'EOF'
-import json, glob, os
-tc = os.environ['TOOLCHAIN']
-seen, out = set(), []
-for f in sorted(glob.glob('.pio/ccdbs/*.json')):
-    for e in json.load(open(f)):
-        cmd = e['command']
-        if cmd.startswith('xtensa-esp32s3-elf-'):
-            e['command'] = f"{tc}/{cmd}"
-        if e['file'] not in seen:
-            seen.add(e['file']); out.append(e)
-json.dump(out, open('compile_commands.json', 'w'), indent=2)
-print(f"merged {len(out)} entries from {len(glob.glob('.pio/ccdbs/*.json'))} envs")
-EOF
+python3 tools/merge_ccdb.py
 ```
 
 Key points:
@@ -307,6 +293,10 @@ Key points:
 - prefix the relative compiler name `xtensa-esp32s3-elf-` with the absolute path
   using `startswith` only; do not use `sed` for global replacement (the name also
   appears inside absolute paths, producing `bin//home` double prefixes);
+- `tools/merge_ccdb.py` appends the missing `-I` for the header-only library
+  `lib/SemanticEnums` to every command: PIO's `-t compiledb` drops include paths
+  of header-only libraries (no `.cpp`), so the real build command carries it but
+  the ccdb does not, which makes clangd report `'SemanticEnums.h' file not found`;
 - re-run after adding/removing environments.
 
 Common problems:

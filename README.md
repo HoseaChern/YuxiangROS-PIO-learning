@@ -251,21 +251,7 @@ for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            test07_Subscription; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
-export TOOLCHAIN="$HOME/.platformio/packages/toolchain-xtensa-esp32s3/bin"
-python3 - <<'EOF'
-import json, glob, os
-tc = os.environ['TOOLCHAIN']
-seen, out = set(), []
-for f in sorted(glob.glob('.pio/ccdbs/*.json')):
-    for e in json.load(open(f)):
-        cmd = e['command']
-        if cmd.startswith('xtensa-esp32s3-elf-'):
-            e['command'] = f"{tc}/{cmd}"
-        if e['file'] not in seen:
-            seen.add(e['file']); out.append(e)
-json.dump(out, open('compile_commands.json', 'w'), indent=2)
-print(f"merged {len(out)} entries from {len(glob.glob('.pio/ccdbs/*.json'))} envs")
-EOF
+python3 tools/merge_ccdb.py
 ```
 
 要点：
@@ -274,6 +260,9 @@ EOF
   文件多条 command 会冲突；
 - 相对编译器名 `xtensa-esp32s3-elf-` 用 `startswith` 补绝对路径前缀；不要用
   `sed` 全局替换（该名字也存在于绝对路径内，会得到 `bin//home` 双前缀）；
+- `tools/merge_ccdb.py` 会为每条命令补齐 header-only 库 `lib/SemanticEnums`
+  的 `-I`：PIO 的 `-t compiledb` 漏注入无 `.cpp` 的纯头文件库，真实构建命令
+  含该路径而 ccdb 缺失，导致 clangd 报 `'SemanticEnums.h' file not found`；
 - 增删环境后重新执行本步骤。
 
 常见问题速查：
