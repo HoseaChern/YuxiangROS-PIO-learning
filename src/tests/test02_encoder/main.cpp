@@ -2,24 +2,12 @@
 #include <Esp32PcntEncoder.h>
 #include <SemanticEnums.h>
 
+#include "config.h"
+
 namespace {
 
-// ---- 串口参数 ----
-
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-
-// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
-
-constexpr uint8_t ENC_LEFT_PIN_A = 16;
-constexpr uint8_t ENC_LEFT_PIN_B = 15;
-constexpr uint8_t ENC_RIGHT_PIN_A = 17;
-constexpr uint8_t ENC_RIGHT_PIN_B = 18;
-
-// ---- 测试参数 ----
-
-constexpr uint32_t LOOP_DELAY_MS = 10; // 采样间隔, 单位: ms
-
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
+// 编译期常量 (串口/编码器引脚/采样间隔) 见 lib/RobotConfig/config.h
 
 Esp32PcntEncoder encoders[2];
 

@@ -5,48 +5,12 @@
 #include <PIDController.h>
 #include <SemanticEnums.h>
 
+#include "config.h"
+
 namespace {
 
-// ---- 串口参数 ----
-
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-
-// ---- 电机引脚 (电机0: 5/4, 电机1: 6/7) ----
-
-constexpr uint8_t MOTOR_LEFT_PIN_A = 5;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 4;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 6;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 7;
-
-// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
-
-constexpr uint8_t ENC_LEFT_PIN_A = 16;
-constexpr uint8_t ENC_LEFT_PIN_B = 15;
-constexpr uint8_t ENC_RIGHT_PIN_A = 17;
-constexpr uint8_t ENC_RIGHT_PIN_B = 18;
-
-// ---- PID 参数 ----
-
-constexpr float PID_KP = 0.625f;           // 比例增益
-constexpr float PID_KI = 0.125f;           // 积分增益
-constexpr float PID_KD = 0.0f;             // 微分增益
-constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
-
-// ---- 运动学参数 ----
-
-constexpr float WHEEL_DISTANCE_MM = 175.0f;        // 轮间距, 单位 mm
-constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
-
-// ---- 目标速度 ----
-
-constexpr float TARGET_LINEAR_SPEED_MM_S = 50.0f;  // 目标线速度, 单位 mm/s
-constexpr float TARGET_ANGULAR_SPEED_RAD_S = 0.1f; // 目标角速度, 单位 rad/s
-
-// ---- 控制周期 ----
-
-constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
-
 // ---- 可变全局状态 (跨 setup/update_and_control 共享) ----
+// 编译期常量 (串口/引脚/PID/运动学/目标速度/控制周期) 见 lib/RobotConfig/config.h
 
 Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
 Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)

@@ -116,8 +116,10 @@ buildable projects, one-to-one:
 - **IntelliSense fallback include**: `MPU6050_light` is only installed in the
   example04 environment; a common-section `-I` points at its header so the IDE
   can resolve it under any active environment (harmless for compilation).
-- **Credential separation**: WiFi credentials live in
-  `lib/Secrets/secrets.h`; the repo keeps only the `secrets.example.h` template.
+- **Config & credential separation**: shared compile-time constants (pins,
+  calibration, WiFi credentials, Agent IP/port, etc.) live in
+  `lib/RobotConfig/config.h` (local copy, not in the repo); the template is
+  `config.example.h`. Hardware/deployment changes never dirty the git worktree.
 
 ```ini
 [env]
@@ -142,8 +144,8 @@ YuxiangROS-PIO-learning/
 ├── lib/                         # private libraries
 │   ├── Kinematics/              # two-wheel differential kinematics (fwd/inv + odom), pure algorithm
 │   ├── PIDController/           # positional PID, pure algorithm
-│   ├── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
-│   └── Secrets/                 # credential template (secrets.example.h)
+│   ├── RobotConfig/             # shared compile-time config (template config.example.h + docs)
+│   └── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
 ├── src/
 │   ├── main.cpp                 # main firmware: micro-ROS + motion control
 │   ├── examples/                # 4 example firmwares (example01~04)
@@ -171,8 +173,8 @@ YuxiangROS-PIO-learning/
 ## Build and Upload
 
 ```bash
-# prepare credentials (copy the template and fill in the WiFi SSID/password)
-cp lib/Secrets/secrets.example.h lib/Secrets/secrets.h
+# prepare configuration (copy the template, fill in WiFi credentials, adjust for your hardware/deployment)
+cp lib/RobotConfig/config.example.h lib/RobotConfig/config.h
 
 # build / upload the main firmware
 pio run -e esp32-s3-devkitc-1
@@ -200,8 +202,8 @@ pio run -e test01_motor -t upload
 
 ## Running and Integration
 
-1. fill in the WiFi credentials in `lib/Secrets/secrets.h`;
-2. set `AGENT_IP_STR` in `src/main.cpp` to the host running the micro-ROS Agent;
+1. fill in the WiFi credentials in `lib/RobotConfig/config.h`;
+2. set `AGENT_IP_STR` in `lib/RobotConfig/config.h` to the host running the micro-ROS Agent;
 3. after flashing, start the micro-ROS Agent on the host:
 
    ```bash

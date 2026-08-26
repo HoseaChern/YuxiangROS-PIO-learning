@@ -3,38 +3,12 @@
 #include <Esp32PcntEncoder.h>
 #include <SemanticEnums.h>
 
+#include "config.h"
+
 namespace {
 
-// ---- 串口参数 ----
-
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-
-// ---- 电机引脚 (电机0: 5/4, 电机1: 6/7) ----
-
-constexpr uint8_t MOTOR_LEFT_PIN_A = 5;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 4;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 6;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 7;
-
-// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
-
-constexpr uint8_t ENC_LEFT_PIN_A = 16;
-constexpr uint8_t ENC_LEFT_PIN_B = 15;
-constexpr uint8_t ENC_RIGHT_PIN_A = 17;
-constexpr uint8_t ENC_RIGHT_PIN_B = 18;
-
-// ---- 测试参数 ----
-
-constexpr uint32_t LOOP_DELAY_MS = 10; // 采样周期, 单位: ms
-constexpr int16_t MOTOR_SPEED = 70;    // 测试转速, 范围 [-100, 100]
-
-// ---- 编码器标定参数 ----
-// 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
-// 单位: mm/ms, 等价于 m/s
-
-constexpr float DISTANCE_PER_TICK_MM = 0.1427138f;
-
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
+// 编译期常量 (串口/引脚/采样周期/测试转速/编码器标定) 见 lib/RobotConfig/config.h
 
 Esp32McpwmMotor motor;        // 电机驱动对象 (setup/loop 共享)
 Esp32PcntEncoder encoders[2]; // 编码器对象数组 (setup/loop 共享)

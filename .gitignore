@@ -2,6 +2,6 @@
 .pio/
 .vscode/
 
-lib/Secrets/secrets.h
+lib/RobotConfig/config.h
 
 compile_commands.json

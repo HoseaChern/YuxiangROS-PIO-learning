@@ -4,49 +4,12 @@
 #include <PIDController.h>
 #include <SemanticEnums.h>
 
+#include "config.h"
+
 namespace {
 
-// ---- 串口参数 ----
-
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-
-// ---- 电机引脚 (电机0: 5/4, 电机1: 6/7) ----
-
-constexpr uint8_t MOTOR_LEFT_PIN_A = 5;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 4;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 6;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 7;
-
-// ---- 编码器引脚 (编码器0: 16/15, 编码器1: 17/18) ----
-
-constexpr uint8_t ENC_LEFT_PIN_A = 16;
-constexpr uint8_t ENC_LEFT_PIN_B = 15;
-constexpr uint8_t ENC_RIGHT_PIN_A = 17;
-constexpr uint8_t ENC_RIGHT_PIN_B = 18;
-
-// ---- PID 参数 ----
-
-constexpr float PID_KP = 0.625f;           // 比例增益
-constexpr float PID_KI = 0.125f;           // 积分增益
-constexpr float PID_KD = 0.0f;             // 微分增益
-constexpr float PID_OUTPUT_LIMIT = 100.0f; // 输出限幅 ±100
-
-// ---- 测试参数 ----
-
-constexpr uint32_t LOOP_DELAY_MS = 10; // 控制周期, 单位 ms
-constexpr float MS_TO_S = 1000.0f;     // mm/ms -> mm/s 换算系数
-
-// ---- 编码器标定参数 ----
-// 距离比时间获取速度: 当前速度 = delta_ticks * 单脉冲距离 / 时间差
-// 单位: mm/ms, 等价于 m/s
-
-constexpr float DISTANCE_PER_TICK_MM = 0.1427138f; // 单个脉冲对应的轮子前进距离, 单位 mm
-
-// ---- 目标速度 ----
-
-constexpr float TARGET_SPEED_MM_S = 100.0f; // 目标轮速, 单位 mm/s
-
 // ---- 可变全局状态 (跨 setup/loop/motor_speed_control 共享) ----
+// 编译期常量 (串口/引脚/PID/控制周期/单位换算/编码器标定/目标轮速) 见 lib/RobotConfig/config.h
 
 Esp32McpwmMotor motor;           // 电机驱动对象 (setup/loop 共享)
 Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)

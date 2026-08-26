@@ -2,25 +2,12 @@
 #include <Esp32McpwmMotor.h>
 #include <SemanticEnums.h>
 
+#include "config.h"
+
 namespace {
 
-// ---- 串口参数 ----
-
-constexpr uint32_t SERIAL_BAUD = 115200; // 串口波特率
-
-// ---- 电机引脚 (电机0: 5/4, 电机1: 6/7) ----
-
-constexpr uint8_t MOTOR_LEFT_PIN_A = 5;
-constexpr uint8_t MOTOR_LEFT_PIN_B = 4;
-constexpr uint8_t MOTOR_RIGHT_PIN_A = 6;
-constexpr uint8_t MOTOR_RIGHT_PIN_B = 7;
-
-// ---- 测试参数 ----
-
-constexpr uint32_t STEP_DELAY_MS = 2000; // 每个方向保持时间, 单位: ms
-constexpr int16_t MOTOR_SPEED = 70;      // 测试转速, 范围 [-100, 100]
-
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
+// 编译期常量 (串口/引脚/测试参数) 见 lib/RobotConfig/config.h
 
 Esp32McpwmMotor motor;
 

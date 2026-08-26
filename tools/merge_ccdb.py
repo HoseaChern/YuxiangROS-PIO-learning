@@ -10,6 +10,7 @@
   真实构建命令含 -Ilib/SemanticEnums, 但 ccdb 缺失, 导致 clangd 解析
   Kinematics.h 时报 'SemanticEnums.h' file not found. 此处对缺失条目统一补齐。
 """
+
 import glob
 import json
 import os
@@ -17,7 +18,7 @@ import os
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLCHAIN = os.path.expanduser("~/.platformio/packages/toolchain-xtensa-esp32s3/bin")
 # header-only 库: compiledb 漏注入的 include, 相对仓库根, 随条目的 directory 解析
-HEADER_ONLY_LIBS = ("lib/SemanticEnums",)
+HEADER_ONLY_LIBS = ("lib/RobotConfig", "lib/SemanticEnums")
 
 
 def main() -> None:
