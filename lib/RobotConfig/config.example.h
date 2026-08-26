@@ -94,10 +94,31 @@ constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单�
 constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长, 单位 ms
 constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, 单位 ms
 
+// ---- 雷达透传任务参数 (主环境融合固件: bridge_task) ----
+
+constexpr uint32_t BRIDGE_STACK_SIZE = 8192;     // bridge_task 任务栈字节数
+constexpr uint8_t BRIDGE_TASK_PRIO = 1;          // bridge_task 任务优先级
+
 // ---- 话题与节点 ----
 
 constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";           // 速度指令话题名
 constexpr char NODE_NAME[] = "fishbot_motion_control"; // 节点名
 constexpr char ODOM_TOPIC[] = "/odom";                 // 里程计话题名
+
+// ---- 激光雷达转接 (test09_bridge 透传固件) ----
+// X2L 接口 (MX1.25-4P, 线序从左到右 M_CTR->GND->Tx->VCC):
+//   VCC(5V) -> 电源 5V; GND -> GND; Tx -> 本固件 UART RX; M_CTR -> PWM 调速
+// 注意: X2L 无数据 RX 引脚, 数据仅从 Tx 出 (单通道)。
+
+constexpr uint8_t LIDAR_UART_RX_PIN = 14;    // 雷达 Tx -> ESP32 UART1 RX (普通 GPIO, 避开 strapping)
+constexpr uint8_t LIDAR_MOTOR_CTRL_PIN = 13; // 雷达 M_CTR 电机调速 (LEDC PWM 输出)
+constexpr uint32_t LIDAR_BAUD = 115200;      // 雷达串口波特率 (与上位机 ydlidar.yaml 一致)
+constexpr uint32_t LIDAR_PWM_FREQ = 10000;   // M_CTR PWM 频率, 单位 Hz (X2L 手册规格典型值 10kHz)
+constexpr uint8_t LIDAR_PWM_RES = 8;         // M_CTR PWM 分辨率, 单位 bit
+constexpr uint8_t LIDAR_PWM_CHANNEL = 0;     // M_CTR LEDC 通道号 (test09 独占, 取 0)
+constexpr uint32_t LIDAR_MOTOR_SPEED = 89;   // M_CTR 初始占空比 35% (89/255, 对齐 X2L 手册 PWM 典型值)
+
+constexpr uint16_t BRIDGE_TCP_PORT = 8889;   // 上位机 ros_serial2wifi tcp_server 端口
+constexpr uint32_t BRIDGE_RECONNECT_MS = 1000; // TCP 断线重连间隔, 单位 ms
 
 #endif // ROBOTCONFIG_H

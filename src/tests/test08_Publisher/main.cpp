@@ -1,27 +1,8 @@
 /**
- * @file main.cpp
- * @brief 主固件: 运动控制(micro-ROS) + 激光雷达透传融合 (单板方案)
+ * @brief 小车运动控制主程序: micro-ROS 订阅 /cmd_vel, 运动学逆解 + PID 控制, 发布 /odom 里程计
  *
- * 本固件把原先相互独立的两份已验证固件融合到同一块 ESP32-S3:
- *   - test08_Publisher: micro-ROS 订阅 /cmd_vel, 运动学逆解 + PID 控制, 发布 /odom
- *   - test09_bridge:    雷达 UART1->WiFi TCP 透传, M_CTR PWM 驱动雷达电机
- *
- * 调度架构 (三部分互不阻塞):
- *   - micro_ros_task (FreeRTOS): 统一初始化 WiFi, 运行 micro-ROS executor
- *                                (订阅 /cmd_vel + 定时发布 /odom)
- *   - bridge_task    (FreeRTOS): 雷达透传, 只等待 WiFi 就绪, 绝不重复 
- *                                WiFi.begin() (避免打断 micro-ROS 的 UDP 会话)
- *   - loop()                     : 电机 PID + 编码器闭环控制
- *
- * 资源占用核验 (无冲突):
- *   - GPIO: 电机 4/5/6/7, 编码器 15/16/17/18, 雷达 RX=14, M_CTR=13
- *   - 外设: 电机用 MCPWM(fishros 库), 雷达 M_CTR 用 LEDC, 彼此独立
- *   - 网络: micro-ROS UDP:8888 与透传 TCP:8889 共用同一 WiFi/lwIP, 端口独立
- *
- * 接线 (X2L, MX1.25-4P 线序 M_CTR->GND->Tx->VCC):
- *   VCC -> 5V;  GND -> GND;  Tx -> GPIO14 (UART1 RX);  M_CTR -> GPIO13 (PWM)
- *
- * 编译/烧录: pio run -e esp32-s3-devkitc-1 -t upload
+ * @note 本文件由原 src/main.cpp 迁移而来, 作为 test08_Publisher 环境保留已验证固件。
+ *       主环境 src/main.cpp 已清空占位, 预留给后续新主程序 (雷达转接/运动控制+透传融合)。
  */
 
 #include <Arduino.h>
@@ -62,14 +43,11 @@ Kinematics kinematics;           // 运动学正逆解对象 (setup/twist_callba
 nav_msgs__msg__Odometry pub_msg; // 里程计消息 (odom_callback 填充, micro_ros_task 初始化)
 rcl_publisher_t publisher;       // 里程计发布者 (micro_ros_task 初始化)
 
-WiFiClient tcp_client; // 透传 TCP client (连上位机 ros_serial2wifi, bridge_task 共享)
-
 // ---- 函数前向声明（内部链接） ----
 
 void twist_callback(const void* msg_in);
 void odom_callback(rcl_timer_t* timer, int64_t last_call_time);
 void micro_ros_task(void* parameter);
-void bridge_task(void* parameter);
 void update_and_control();
 
 } // namespace
@@ -79,24 +57,6 @@ void setup() {
     while (!Serial) {
         ;
     }
-    Serial.println("\n=== fishbot: 运动控制 + 雷达透传 ===");
-
-    // 雷达 UART1: 只配 RX (X2L 无数据 RX 引脚), 115200 8N1
-    // 增大 RX 缓冲: 扫描数据流满载时防 FIFO 溢出丢帧 (需在 begin 前调用)
-    Serial1.setRxBufferSize(4096);
-    Serial1.begin(LIDAR_BAUD, SERIAL_8N1, LIDAR_UART_RX_PIN, -1);
-
-    // M_CTR 电机 PWM (LEDC): 上电即驱动雷达电机旋转
-    ledcSetup(LIDAR_PWM_CHANNEL, LIDAR_PWM_FREQ, LIDAR_PWM_RES);
-    ledcAttachPin(LIDAR_MOTOR_CTRL_PIN, LIDAR_PWM_CHANNEL);
-    ledcWrite(LIDAR_PWM_CHANNEL, LIDAR_MOTOR_SPEED);
-    Serial.printf(
-        "[LIDAR] M_CTR PWM: pin=%u chan=%u freq=%uHz duty=%u\n",
-        LIDAR_MOTOR_CTRL_PIN,
-        LIDAR_PWM_CHANNEL,
-        LIDAR_PWM_FREQ,
-        LIDAR_MOTOR_SPEED
-    );
 
     // 初始化编码器
     encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);     // 编码器0
@@ -128,10 +88,9 @@ void setup() {
     pid_controller[MOTOR_LEFT].update_target(motor_speeds[MOTOR_LEFT]);
     pid_controller[MOTOR_RIGHT].update_target(motor_speeds[MOTOR_RIGHT]);
 
-    // 创建任务运行 micro-ROS (参数: 任务函数, 名称, 栈字节数, 参数, 优先级, 句柄)
+    // 创建任务运行 micro-ROS
+    // 参数依次为: 任务函数, 任务名称, 任务堆栈字节数, 传递给任务函数的参数, 任务优先级, 任务句柄
     xTaskCreate(micro_ros_task, "micro_ros", MICRO_ROS_STACK_SIZE, NULL, MICRO_ROS_TASK_PRIO, NULL);
-    // 创建任务运行雷达透传
-    xTaskCreate(bridge_task, "bridge", BRIDGE_STACK_SIZE, NULL, BRIDGE_TASK_PRIO, NULL);
 }
 
 void loop() {
@@ -160,6 +119,7 @@ namespace {
  */
 void twist_callback(const void* msg_in) {
     // 将订阅消息强制转换为 Twist 消息指针
+    // 在 pure-C 中, 空指针可以泛指任意类型指针; 因此在使用时, 应当强制类型转换到期待的类型
     const geometry_msgs__msg__Twist* twist_msg =
         static_cast<const geometry_msgs__msg__Twist*>(msg_in);
 
@@ -181,6 +141,8 @@ void twist_callback(const void* msg_in) {
 
 /**
  * @brief 里程计定时器回调函数
+ * 
+ * @attention 在 micro_ros_platformio.h 中, 已经有函数声明定义为 void timer_callback(rcl_timer_t* timer, int64_t last_call_time)
  * 
  * @param timer 定时器指针
  * @param last_call_time 上一次调用时间
@@ -210,27 +172,29 @@ void odom_callback(rcl_timer_t* timer, int64_t last_call_time) {
 }
 
 /**
- * @brief micro-ROS 任务 (统一初始化 WiFi)
+ * @brief micro-ROS 任务
  * 
  * @param parameter 任务参数
  * @note 
- * 1. 单独创建一个任务运行 micro-ROS, 相当于一个线程
- * 2. 本任务负责 set_microros_wifi_transports() 建立 WiFi 连接;
- *    bridge_task 只等待 WiFi 就绪, 不重复 begin, 避免打断本任务的 UDP 会话。
+ * 1. 单独创建一个任务运行 micro-ROS, 相当于一个线程 \note
+ * 2. xTaskCreate() 要求的任务函数原型必须为: void task(void* parameter) \note
  */
 void micro_ros_task(void* parameter) {
-    (void)parameter;
+    (void)parameter; // 显式转换为 void，告诉编译器"我故意不用"
 
-    static rcl_allocator_t allocator;
-    static rclc_support_t support;
-    static rcl_node_t node;
-    static rclc_executor_t executor;
+    static rcl_allocator_t allocator; // 内存分配器
+    static rclc_support_t support;    // 存储时钟/内存分配器/上下文, 提供支持
+    static rcl_node_t node;           // ROS节点
+    static rclc_executor_t executor;  // 管理订阅回调和计时器回调的执行
 
-    static rcl_subscription_t subscriber;
-    static geometry_msgs__msg__Twist sub_msg;
-    static rcl_timer_t timer;
+    static rcl_subscription_t subscriber;     // 速度消息订阅者
+    static geometry_msgs__msg__Twist sub_msg; // 订阅的速度消息
+    static rcl_timer_t timer;                 // 定时器
 
     // 1. 设置传输协议并延时等待设置完成
+    // 主机 IP 地址: hostname -I / ipconfig / ip addr show
+    // 注意, lo(本地回环)和state DOWN/NO-CARRIER(未工作)两类应当忽略
+    // 这里最好用 IPv4
     IPAddress agent_ip;
     agent_ip.fromString(AGENT_IP_STR);
     set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
@@ -246,16 +210,19 @@ void micro_ros_task(void* parameter) {
     rclc_node_init_default(&node, NODE_NAME, "", &support);
 
     // 5. 初始化执行器
-    unsigned int num_handles = EXECUTOR_HANDLES;
+    unsigned int num_handles = EXECUTOR_HANDLES; // 订阅事件和定时器事件的句柄数
     rclc_executor_init(&executor, &support.context, num_handles, &allocator);
 
     // 6. 初始化速度消息订阅者并添加到执行器
+    // 参数依次为: 订阅者指针, 节点指针, 消息接口类型, 订阅话题
+    // best_effort: 使用最大努力, 详见QoS
     rclc_subscription_init_best_effort(
         &subscriber,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         CMD_VEL_TOPIC
     );
+    // 参数依次为: 执行器指针, 订阅者指针, 订阅消息指针, 订阅回调函数指针, 调用类型宏
     rclc_executor_add_subscription(&executor, &subscriber, &sub_msg, &twist_callback, ON_NEW_DATA);
 
     // 7. 初始化发布者
@@ -271,83 +238,18 @@ void micro_ros_task(void* parameter) {
 
     // 8. 时间同步
     while (!rmw_uros_epoch_synchronized()) {
+        // 如果没有同步, 则尝试进行时间同步
         rmw_uros_sync_session(SYNC_ATTEMPT_MS);
         delay(SYNC_POLL_MS);
     }
 
     // 9. 初始化定时器并添加到执行器
+    // 每 50 ms 执行一次, 此函数的第三参数单位要求是 ns
     rclc_timer_init_default(&timer, &support, RCL_MS_TO_NS(ODOM_PUBLISH_MS), odom_callback);
     rclc_executor_add_timer(&executor, &timer);
 
     // 10. 循环执行器
     rclc_executor_spin(&executor);
-}
-
-/**
- * @brief 雷达透传任务 (UART1 <-> TCP)
- *
- * @param parameter 任务参数
- * @note 
- * 1. 只等待 WiFi 就绪(micro_ros_task 已建立), 绝不重复 WiFi.begin()
- * 2. WiFi/UART 初始化已在 setup 完成, 本任务只做连接与双向透传
- * 3. 雷达数据为单向出 (X2L), TCP 下行映射回 UART 保持契约, 忽略雷达侧
- */
-void bridge_task(void* parameter) {
-    (void)parameter;
-
-    static uint8_t buf[512];
-    uint32_t uart_rx_total = 0;
-    uint32_t last_diag = 0;
-
-    for (;;) {
-        // 1. 等待 WiFi 就绪 (由 micro_ros_task 建立)
-        if (WiFi.status() != WL_CONNECTED) {
-            delay(BRIDGE_RECONNECT_MS);
-            continue;
-        }
-
-        // 2. 确保 TCP 已连接 (上位机 ros_serial2wifi tcp_server:8889)
-        if (!tcp_client.connected()) {
-            Serial.printf("[BRIDGE] 连接 %s:%u ...\n", AGENT_IP_STR, BRIDGE_TCP_PORT);
-            if (tcp_client.connect(AGENT_IP_STR, BRIDGE_TCP_PORT)) {
-                Serial.println("[BRIDGE] TCP 已连接");
-            } else {
-                delay(BRIDGE_RECONNECT_MS);
-                continue;
-            }
-        }
-
-        // 3. 双向透传: UART1 -> TCP
-        size_t n = Serial1.available();
-        if (n > 0) {
-            if (n > sizeof(buf)) {
-                n = sizeof(buf);
-            }
-            n = Serial1.read(buf, n);
-            if (n > 0) {
-                uart_rx_total += n;
-                tcp_client.write(buf, n);
-            }
-        }
-        // TCP -> UART1 (保留双向契约; X2L 无数据 RX, 雷达侧忽略)
-        size_t m = tcp_client.available();
-        if (m > 0) {
-            if (m > sizeof(buf)) {
-                m = sizeof(buf);
-            }
-            m = tcp_client.read(buf, m);
-            if (m > 0) {
-                Serial1.write(buf, m);
-            }
-        }
-
-        // 4. 诊断: 每 2s 打印 UART1 累计接收字节 (独立于 WiFi/TCP 状态)
-        if (millis() - last_diag >= 2000) {
-            Serial.printf("[UART] 最近 2s 收到 %u 字节\n", uart_rx_total);
-            uart_rx_total = 0;
-            last_diag = millis();
-        }
-    }
 }
 
 /**
