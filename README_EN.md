@@ -7,7 +7,7 @@
 > publishes `/odom`.
 > Highlight: the book directly modifies the previous section's code instead of
 > presenting an integrated project; this repo slices its per-section code blocks
-> into 12 independently buildable firmwares (examples / tests / main) for
+> into 14 independently buildable firmwares (examples / tests / main) for
 > side-by-side reading and verification.
 > The repo name "PIO" stands for PlatformIO (firmware side), complementary to the
 > host-side main repository
@@ -27,9 +27,10 @@
   - [Dependencies](#dependencies)
   - [Build and Upload](#build-and-upload)
   - [Running and Integration](#running-and-integration)
+  - [Lidar Radar Passthrough (a different path from the book)](#lidar-radar-passthrough-a-different-path-from-the-book)
   - [Optimizations](#optimizations)
   - [Development Environment](#development-environment)
-    - [Generating compile\_commands.json (12 Envs Merged)](#generating-compile_commandsjson-12-envs-merged)
+    - [Generating compile\_commands.json (14 Envs Merged)](#generating-compile_commandsjson-14-envs-merged)
   - [Acknowledgements and References](#acknowledgements-and-references)
   - [License](#license)
 
@@ -74,10 +75,14 @@ buildable projects, one-to-one:
 | 9.4.1 the first node                       | `tests/test06_wifi`                                | micro-ROS WiFi connection                |
 | 9.4.2 subscribing to control the robot     | `tests/test07_Subscription`                        | `/cmd_vel` subscription + motion control |
 | 9.4.3 publishing the odometry topic        | main firmware `src/main.cpp`                       | `/odom` publishing + full integration    |
+| 9.5.1 driving & visualizing lidar scan     | `tests/test09_bridge`, main `bridge_task`          | lidar passthrough + motor PWM            |
 
 > Note: 9.2.1 (platform introduction) involves no code; 9.3.2 covers both "speed
 > measurement" and "speed conversion", hence two slices; the main firmware is the
-> convergence of 9.3.5 and 9.4.3 (embedded odometry + publishing `/odom`).
+> convergence of 9.3.5 and 9.4.3 (embedded odometry + publishing `/odom`);
+> 9.5.1 uses a standalone adapter board (ESP8266) in the book, this repo has the
+> ESP32-S3 take over instead, hence no standalone adapter slice; see the Lidar
+> section.
 
 ## Hardware and Pinout
 
@@ -85,6 +90,13 @@ buildable projects, one-to-one:
 | --------- | ---------------------- | ----------------------- |
 | Motor PWM | GPIO 5 / 4             | GPIO 6 / 7              |
 | Encoder   | GPIO 16 / 15           | GPIO 17 / 18            |
+
+| Lidar (YDLidar X2L) | Connected to ESP32-S3 | Description          |
+| ------------------- | --------------------- | -------------------- |
+| VCC                 | 5V power (>=1A)       | supply positive      |
+| GND                 | GND                   | supply ground        |
+| Tx                  | GPIO14 (UART1 RX)     | lidar -> MCU only    |
+| M_CTR               | GPIO13 (LEDC PWM)     | motor speed control  |
 
 | Item            | Configuration                                                 |
 | --------------- | ------------------------------------------------------------- |
@@ -101,7 +113,7 @@ buildable projects, one-to-one:
 
 ## platformio.ini Design
 
-`platformio.ini` is the core configuration: 12 environments (1 main + 4 examples + 7 tests), each example/test only compiles its own `main.cpp`, independent of the main firmware. Key points:
+`platformio.ini` is the core configuration: 14 environments (1 main + 4 examples + 9 tests), each example/test only compiles its own `main.cpp`, independent of the main firmware. Key points:
 
 - **`build_src_filter` isolation**: the main firmware uses `+<*> -<examples>
   -<tests>`; each example/test keeps only its own directory. Otherwise the
@@ -109,7 +121,7 @@ buildable projects, one-to-one:
 - **Per-environment `lib_deps`**: no `lib_deps` in the common section (there is
   no common dependency across environments); each environment installs only what
   it needs, so `lib_ignore` is never required.
-- **micro-ROS declared only where used** (main, test06/07): its
+- **micro-ROS declared only where used** (main, test06/07/08): its
   `extra_script.py` build hook runs unconditionally in any environment where it
   is installed (injects macros, links the prebuilt `libmicroros`), so it must not
   be installed into unrelated environments.
@@ -147,21 +159,21 @@ YuxiangROS-PIO-learning/
 │   ├── RobotConfig/             # shared compile-time config (template config.example.h + docs)
 │   └── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
 ├── src/
-│   ├── main.cpp                 # main firmware: micro-ROS + motion control
+│   ├── main.cpp                 # main firmware: micro-ROS motion control + lidar passthrough (single-board merge)
 │   ├── examples/                # 4 example firmwares (example01~04)
-│   └── tests/                   # 7 test firmwares (test01~07)
-├── docs/                        # study notes (About_PlatformIO, CLI usage)
+│   └── tests/                   # 9 test firmwares (test01~09, incl. passthrough test09_bridge)
+├── docs/                        # study notes & debugging records (incl. lidar integration)
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ toolchain conventions
-└── platformio.ini               # 12-environment configuration
+└── platformio.ini               # 14-environment configuration
 ```
 
 ## Dependencies
 
 | Library              | Purpose                 | Source                                                              | Used by                     |
 | -------------------- | ----------------------- | ------------------------------------------------------------------- | --------------------------- |
-| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07 |
-| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07 |
-| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07             |
+| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08 |
+| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08 |
+| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08             |
 | MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04                   |
 
 > Why the fishros prebuilt mirror: the official
@@ -187,7 +199,7 @@ pio run -e test01_motor -t upload
 
 | Type    | Environment          | Description                                        |
 | ------- | -------------------- | -------------------------------------------------- |
-| Main    | esp32-s3-devkitc-1   | motion control + micro-ROS (`/cmd_vel` -> `/odom`) |
+| Main    | esp32-s3-devkitc-1   | motion control + lidar passthrough (micro-ROS `/cmd_vel`, `/odom` + bridge_task) |
 | Example | example01_helloworld | Hello World                                        |
 | Example | example02_LED        | LED blink                                          |
 | Example | example03_Ultrasound | ultrasonic ranging                                 |
@@ -199,6 +211,8 @@ pio run -e test01_motor -t upload
 | Test    | test05_Kinematics    | inverse kinematics + PID control test              |
 | Test    | test06_wifi          | micro-ROS WiFi connection test                     |
 | Test    | test07_Subscription  | `/cmd_vel` subscription + motion control test      |
+| Test    | test08_Publisher     | `/cmd_vel` subscription + `/odom` publishing (migrated from the main firmware) |
+| Test    | test09_bridge        | lidar UART -> WiFi TCP passthrough (ESP32-S3 as the adapter board) |
 
 ## Running and Integration
 
@@ -217,6 +231,37 @@ pio run -e test01_motor -t upload
    ```
 
 5. inspect odometry: `ros2 topic echo /odom`
+
+## Lidar Radar Passthrough (a different path from the book)
+
+Chapter 9 of the book uses a separate adapter board (fishros
+`fishbot-laser-control`, ESP8266 + `uart2udp.bin`) for lidar UART->WiFi passthrough
+and motor PWM control. This repo **does not buy an adapter board**: the
+motion-control MCU (ESP32-S3) does the job instead (LEDC PWM drives the lidar
+motor), keeping the same interface contract as the original adapter (TCP client
+actively connects to the host port 8889), so the host side is unchanged. Wiring:
+lidar Tx -> GPIO14 (UART1 RX, 115200), M_CTR -> GPIO13 (PWM 10 kHz).
+
+Current progress (split by task boundary):
+
+| Phase   | Content                                                        | Status                              |
+| ------- | ------------------------------------------------------------- | ----------------------------------- |
+| Phase 1 | standalone passthrough `test09_bridge`, `/scan` ~13.7 Hz       | Done                                |
+| Phase 2 | merged into `main.cpp` (software done) -> mapping / navigation | In progress (software done, map TBD) |
+
+Key differences and root causes:
+
+- the lidar motor is driven by ESP32 PWM, so `ydlidar.yaml` must set
+  `support_motor_dtr: false` — the book's adapter board has its own motor speed
+  control, but if the SDK's DTR control were used here the level cannot travel
+  through the TCP/pty passthrough link and the motor would not spin;
+- bring-up order: start `tcp_server` on the host first (it creates
+  `/tmp/tty_laser`), then `ros2 launch ydlidar_ros2 ydlidar_a1.launch.py`;
+  subscribing to `/scan` needs best-effort QoS (`echo/hz` with
+  `--qos-reliability best_effort`, rviz2 QoS Policy = Sensor Data);
+- full wiring, bring-up sequence (what starts first, what to observe) and
+  troubleshooting: see
+  [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md).
 
 ## Optimizations
 
@@ -271,7 +316,7 @@ Rationale (differences from common alternatives):
 The repo commits `.clangd`, `.clang-format`, and `.clang-tidy` (`.vscode/` is
 not committed).
 
-### Generating compile_commands.json (12 Envs Merged)
+### Generating compile_commands.json (14 Envs Merged)
 
 `pio run -t compiledb` only emits the currently active environment, so generate
 per env and merge with dedup (machine-generated, contains absolute paths, not
@@ -283,7 +328,7 @@ mkdir -p .pio/ccdbs
 for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
-           test07_Subscription; do
+           test07_Subscription test08_Publisher test09_bridge; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py

@@ -4,7 +4,7 @@
 > 本仓库是第 9 章"实体机器人"的 ESP32-S3 两轮差速底盘运动控制固件：通过
 > micro-ROS 订阅 `/cmd_vel`，经运动学逆解与 PID 速度闭环驱动电机，并发布 `/odom`。
 > 特色：原书每小节直接在上小节代码上改、没有整合工程；本仓库把各小节散落的
-> 代码块切片为 12 个独立可编译工程（examples / tests / main），便于对照原书逐节阅读。
+> 代码块切片为 14 个独立可编译工程（examples / tests / main），便于对照原书逐节阅读。
 > 仓库名 PIO 即 PlatformIO（下位机固件侧），与主仓库
 > [YuXiangROS-jazzy-learning](https://github.com/HoseaChern/YuXiangROS-jazzy-learning)
 > （ROS 2 上位机侧）互补配套。
@@ -23,9 +23,10 @@
   - [依赖库](#依赖库)
   - [编译与烧录](#编译与烧录)
   - [运行与联调](#运行与联调)
+  - [激光雷达转接（与原书不同的路）](#激光雷达转接与原书不同的路)
   - [自主优化](#自主优化)
   - [开发环境](#开发环境)
-    - [compile\_commands.json 生成（12 环境合并）](#compile_commandsjson-生成12-环境合并)
+    - [compile\_commands.json 生成（14 环境合并）](#compile_commandsjson-生成14-环境合并)
   - [致谢与参考](#致谢与参考)
   - [许可证](#许可证)
 
@@ -63,9 +64,12 @@
 | 9.4.1 第一个节点               | `tests/test06_wifi`                                | micro-ROS WiFi 连接        |
 | 9.4.2 订阅话题控制机器人       | `tests/test07_Subscription`                        | `/cmd_vel` 订阅 + 运动控制 |
 | 9.4.3 发布机器人里程计话题     | 主固件 `src/main.cpp`                              | `/odom` 发布 + 全流程集成  |
+| 9.5.1 驱动并显示雷达点云       | `tests/test09_bridge`、主固件 `bridge_task`        | 雷达透传 + 电机 PWM        |
 
 > 说明：9.2.1（平台介绍）不涉及代码；9.3.2 同时覆盖"速度测量"与"速度转换"两段代码，
-> 故映射两个切片；主固件是 9.3.5 与 9.4.3 的收敛（内嵌里程计 + 发布 `/odom`）。
+> 故映射两个切片；主固件是 9.3.5 与 9.4.3 的收敛（内嵌里程计 + 发布 `/odom`）；
+> 9.5.1 原书用独立转接板（ESP8266）透传雷达，本仓库由 ESP32-S3 兼任，无独立转接板
+> 切片，详见「激光雷达转接」节。
 
 ## 硬件与引脚
 
@@ -73,6 +77,13 @@
 | -------- | --------------------- | --------------------- |
 | 电机 PWM | GPIO 5 / 4            | GPIO 6 / 7            |
 | 编码器   | GPIO 16 / 15          | GPIO 17 / 18          |
+
+| 雷达（YDLidar X2L） | 接到 ESP32-S3       | 说明             |
+| ------------------- | ------------------- | ---------------- |
+| VCC                 | 电源 5V（独立 ≥1A） | 供电正极         |
+| GND                 | GND                 | 供电地           |
+| Tx                  | GPIO14（UART1 RX）  | 数据仅雷达到主控 |
+| M_CTR               | GPIO13（LEDC PWM）  | 电机调速端       |
 
 | 项目     | 配置                                                                |
 | -------- | ------------------------------------------------------------------- |
@@ -87,7 +98,7 @@
 
 ## platformio.ini 关键设计
 
-`platformio.ini` 是本仓库的核心配置：12 个环境（1 主 + 4 示例 + 7 测试），每个
+`platformio.ini` 是本仓库的核心配置：14 个环境（1 主 + 4 示例 + 9 测试），每个
 示例/测试只编译自身 `main.cpp`，与主固件互不干扰。关键点：
 
 - **`build_src_filter` 环境隔离**：主固件 `+<*> -<examples> -<tests>`；每个
@@ -95,7 +106,7 @@
   链接失败。
 - **`lib_deps` 按环境声明**：公共段不写 `lib_deps`（各环境依赖无公共交集），
   每环境只装自己需要的库，`lib_ignore` 完全不需要。
-- **micro-ROS 只声明在使用它的环境**（主环境、test06/07）：其 `extra_script.py`
+- **micro-ROS 只声明在使用它的环境**（主环境、test06/07/08）：其 `extra_script.py`
   构建钩子在被安装的环境无条件执行（注入宏、链接预编译 `libmicroros`），无法用
   `lib_ignore` 阻止，故不能装进无关环境。
 - **IntelliSense 兜底 include**：`MPU6050_light` 只装在 example04 环境，公共段加
@@ -130,22 +141,22 @@ YuxiangROS-PIO-learning/
 │   ├── RobotConfig/             # 共用编译期配置（模板 config.example.h + docs）
 │   └── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
 ├── src/
-│   ├── main.cpp                 # 主固件：micro-ROS + 运动控制
+│   ├── main.cpp                 # 主固件：micro-ROS 运动控制 + 激光雷达透传（单板融合）
 │   ├── examples/                # 4 个示例固件（example01~04）
-│   └── tests/                   # 7 个测试固件（test01~07）
-├── docs/                        # 学习笔记（About_PlatformIO、CLI 使用等）
+│   └── tests/                   # 9 个测试固件（test01~09，含透传 test09_bridge）
+├── docs/                        # 学习笔记与调试记录（含激光雷达接入全流程）
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ 工具链规范
-└── platformio.ini               # 12 环境工程配置
+└── platformio.ini               # 14 环境工程配置
 ```
 
 ## 依赖库
 
-| 库                   | 用途            | 来源                                                                 | 使用环境                      |
-| -------------------- | --------------- | -------------------------------------------------------------------- | ----------------------------- |
-| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07 |
-| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07 |
-| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07             |
-| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04                     |
+| 库                   | 用途            | 来源                                                                 | 使用环境                         |
+| -------------------- | --------------- | -------------------------------------------------------------------- | -------------------------------- |
+| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07/08 |
+| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07/08 |
+| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07/08             |
+| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04                        |
 
 > 为何用 fishros 预编译镜像：官方
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -168,20 +179,22 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| 类型   | 环境名               | 说明                                                  |
-| ------ | -------------------- | ----------------------------------------------------- |
-| 主固件 | esp32-s3-devkitc-1   | 运动控制 + micro-ROS（订阅 `/cmd_vel`，发布 `/odom`） |
-| 示例   | example01_helloworld | Hello World                                           |
-| 示例   | example02_LED        | LED 闪烁                                              |
-| 示例   | example03_Ultrasound | 超声波测距                                            |
-| 示例   | example04_IMU        | MPU6050 姿态解算                                      |
-| 测试   | test01_motor         | 电机驱动测试                                          |
-| 测试   | test02_encoder       | 编码器读取与标定                                      |
-| 测试   | test03_speed_trans   | 速度换算测试                                          |
-| 测试   | test04_PID           | PID 速度闭环测试                                      |
-| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                             |
-| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                               |
-| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                        |
+| 类型   | 环境名               | 说明                                                                   |
+| ------ | -------------------- | ---------------------------------------------------------------------- |
+| 主固件 | esp32-s3-devkitc-1   | 运动控制 + 激光雷达透传（micro-ROS `/cmd_vel`、`/odom` + bridge_task） |
+| 示例   | example01_helloworld | Hello World                                                            |
+| 示例   | example02_LED        | LED 闪烁                                                               |
+| 示例   | example03_Ultrasound | 超声波测距                                                             |
+| 示例   | example04_IMU        | MPU6050 姿态解算                                                       |
+| 测试   | test01_motor         | 电机驱动测试                                                           |
+| 测试   | test02_encoder       | 编码器读取与标定                                                       |
+| 测试   | test03_speed_trans   | 速度换算测试                                                           |
+| 测试   | test04_PID           | PID 速度闭环测试                                                       |
+| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                                              |
+| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                                                |
+| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                         |
+| 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                         |
+| 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                         |
 
 ## 运行与联调
 
@@ -200,6 +213,32 @@ pio run -e test01_motor -t upload
    ```
 
 5. 查看里程计：`ros2 topic echo /odom`
+
+## 激光雷达转接（与原书不同的路）
+
+第 9 章原书用独立转接板（鱼香ROS `fishbot-laser-control`，ESP8266 + `uart2udp.bin`）
+完成雷达 UART→WiFi 透传与电机 PWM 调速。本仓库**不买转接板**，改由运动控制
+主控 ESP32-S3 兼任（LEDC PWM 驱动雷达电机），并遵守与原转接板相同的接口契约
+（TCP client 主动连上位机 8889），上位机零改动即可替换。接线：雷达 Tx → GPIO14
+（UART1 RX，115200）、M_CTR → GPIO13（PWM 10kHz）。
+
+当前进度（按任务界限划分）：
+
+| 阶段   | 内容                                                     | 状态                           |
+| ------ | -------------------------------------------------------- | ------------------------------ |
+| 阶段一 | 独立透传固件 `test09_bridge` 打通链路，`/scan` 约 13.7Hz | 已完成                         |
+| 阶段二 | 融合固件 `main.cpp`（软件完成）→ 建图 / 导航             | 进行中（软件完成，建图未开始） |
+
+关键差异与根因：
+
+- 雷达电机由 ESP32 PWM 驱动，上位机 `ydlidar.yaml` 必须 `support_motor_dtr: false`
+  ——原书转接板自带电机调速，而本方案若沿用 SDK 的 DTR 控制，电平无法穿透 TCP/pty
+  透传链路，电机不会转；
+- 联调顺序：先启动上位机 `tcp_server`（创建 `/tmp/tty_laser`），再
+  `ros2 launch ydlidar_ros2 ydlidar_a1.launch.py`；订阅 `/scan` 需 best_effort QoS
+  （`echo/hz` 加 `--qos-reliability best_effort`，rviz2 的 QoS Policy 改 Sensor Data）；
+- 完整接线、调试时序（先启动谁、再启动谁、观察谁）与排错，见
+  [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md)。
 
 ## 自主优化
 
@@ -241,7 +280,7 @@ pio run -e test01_motor -t upload
 
 仓库已入库 `.clangd`、`.clang-format`、`.clang-tidy` 三份规范（`.vscode/` 不入库）。
 
-### compile_commands.json 生成（12 环境合并）
+### compile_commands.json 生成（14 环境合并）
 
 `pio run -t compiledb` 每次只产出当前激活环境，故循环生成再合并去重（本机生成物，
 含绝对路径，不入库）：
@@ -252,7 +291,7 @@ mkdir -p .pio/ccdbs
 for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
-           test07_Subscription; do
+           test07_Subscription test08_Publisher test09_bridge; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py
