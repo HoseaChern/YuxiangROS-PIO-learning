@@ -1,17 +1,6 @@
-# 激光雷达接入调试记录（阶段一：test09_bridge 独立透传）
+# 激光雷达接入调试记录
 
-> **任务界限**：本文只记录**已完成**的调试内容——阶段一 `test09_bridge` 独立
-> 透传验证的完整操作时序。阶段二（最终形态）的软件部分已并入 `src/main.cpp`
-> 并通过编译，尚未整机实测；建图 / 导航**未开始**。
-
-## 0. 任务流程界限
-
-| 阶段   | 内容                                              | 状态   |
-| ------ | ------------------------------------------------- | ------ |
-| 阶段一 | test09_bridge 独立透传验证（本文第 1 节全部内容） | 已完成 |
-| 阶段二 | 融合固件 main.cpp（软件完成）→ 建图 / 导航        | 进行中 |
-
-## 1. 阶段一：test09_bridge 独立透传（已完成）
+## 1. 阶段一：test09_bridge 独立透传
 
 ### 1.1 目标与验收
 
@@ -101,54 +90,50 @@ ros2 run ros_serial2wifi tcp_server --serial_port /tmp/tty_laser --port 8889
 | 上位机 tcp_server 日志        | client 接入    | 无接入查防火墙/网段                |
 | 上位机 `ls -l /tmp/tty_laser` | 文件存在       | 存在即 pty 映射就绪                |
 
-#### 1.3.3 第 3 步：最后启动雷达驱动，观察 /scan
+#### 1.3.3 第 3 步：最后启动雷达驱动，验证 /scan（阶段一成功标志）
 
 ```bash
-ros2 launch ydlidar_ros2 ydlidar_a1.launch.py
+ros2 launch ydlidar_ros2 ydlidar_launch.py
 ```
 
 **为什么最后启动**：ydlidar 打开 `/tmp/tty_laser` 前，该虚拟串口必须先由
 tcp_server（第 2 步）创建。
 
-**最后观察**：
+**阶段一成功标志（命令行订阅到数据即通过）**：
 
 | 命令                    | 预期          | 判定                             |
 | ----------------------- | ------------- | -------------------------------- |
 | `ros2 topic hz /scan`   | 约 13.7 Hz    | 明显偏低查 FIFO 溢出（见 1.4.2） |
 | `ros2 topic echo /scan` | 角度/距离正常 | 全为 0 查链路未通                |
-| `rviz2` 添加 LaserScan  | 轮廓正确      | 轮廓错查雷达朝向/安装            |
+
+两条命令均需显式指定 QoS（原因见下），能稳定出数即阶段一验收通过
+（对应 1.1 验收第 4 项，前三项在第 1、2 步已满足）。
 
 **QoS 关键点（最容易踩的坑）**：ydlidar_ros2 发布 `/scan` 用的是
 `rclcpp::SensorDataQoS()`，即 **reliability=Best Effort + history=Keep Last 5**
 （见 `ydlidar_ros2/src/ydlidar_node.cpp` 第 165 行）。而 ROS2 CLI 与 rviz2 的
 默认订阅 QoS 是 **Reliable**，与发布端不匹配——现象是"命令无输出 / rviz 空白但
-不报错"。因此：
+不报错"。因此 `echo` / `hz` 需显式指定：
 
-- `ros2 topic echo /scan` 需显式指定 QoS：
+```bash
+ros2 topic echo /scan --qos-reliability best_effort
+ros2 topic hz /scan --qos-reliability best_effort
+```
 
-  ```bash
-  ros2 topic echo /scan --qos-reliability best_effort
-  ```
+#### 1.3.4 第 4 步（可选）：rviz2 可视化辅助验证
 
-- `ros2 topic hz /scan` 若不出数，同样加 `--qos-reliability best_effort`；
-- **rviz2 详细设定**（按顺序操作）：
+rviz2 不是验收项，仅用于直观确认点云轮廓与雷达安装朝向，按顺序操作：
 
-  1. 启动：`rviz2`；
-  2. 左上角 Global Options → Fixed Frame 改为 `laser_link`（与
-     `ydlidar_ros2/params/ydlidar.yaml` 的 `frame_id` 一致）；
-  3. Displays 面板 → Add → By topic → 选择 `/scan`（类型 LaserScan）→ OK；
-  4. **在 Displays 面板展开刚添加的 LaserScan 项 → 展开 Topic → 把 QoS Policy
-     从 "Default" 改为 "Sensor Data"**（即 Best Effort + Keep Last 5）。改完后
-     rviz2 会重新订阅，轮廓即出现；不改则一直空白且无任何报错。
+1. 启动：`rviz2`；
+2. 左上角 Global Options → Fixed Frame 改为 `laser_link`（与
+   `ydlidar_ros2/params/ydlidar.yaml` 的 `frame_id` 一致）；
+3. Displays 面板 → Add → By topic → 选择 `/scan`（类型 LaserScan）→ OK；
+4. **在 Displays 面板展开刚添加的 LaserScan 项 → 展开 Topic → 把 Reliability
+   从 "Default" 改为 "Best Effort"**（rviz2 预设项 "Sensor Data" 即
+   Best Effort + Keep Last 5，选它等价）。改完后 rviz2 会重新订阅，轮廓即
+   出现；不改则一直空白且无任何报错。
 
 至此阶段一验收 4 项全部满足，`test09` 独立调试结束。
-
-#### 1.3.4 等价一键入口（调试通过后可选用）
-
-`robot_bringup/bringup.launch.py` 把 agent + tcp_server + ydlidar 串起，ydlidar
-延时 5s 等 `/tmp/tty_laser` 就绪，与手动启动等价。注意：**阶段一不需要
-micro_ros_agent（那是阶段二融合固件的 UDP 中转）**，一键入口把它一并拉起是为
-阶段二（融合固件）准备的，阶段一多起无副作用。
 
 ### 1.4 本次调试产生的关键决策
 
@@ -201,14 +186,145 @@ scan 的 frame_id 可在 TF 树中解析。
 | `/scan` 频率低或丢帧        | UART FIFO 溢出                   | `setRxBufferSize(4096)` 且 begin 前调用  |
 | `echo/hz` 无输出、rviz 空白 | 订阅 QoS 不匹配                  | 按 1.3.3 指定 best_effort 订阅           |
 
-## 2. 阶段二：融合固件 + 建图 / 导航
+## 2. 阶段二：融合固件 + 建图 / 导航（完整计划）
 
-阶段二是最终形态，分两部分：
+阶段二是最终形态。分工原则：硬件操作（上电、按 RST、遥控走位）由人工完成；
+软件改动、编译验证与流程指导按本节执行。流程沿用原书 9.5.2~9.5.4 的路径框架：
+**TF 构建（9-55~9-61）→ 上下位互通验证 → 一键 bringup 联调（9-62）→ 建图
+（9-63）→ 存图（9-64）→ 导航（9-65/9-66）**，各代码清单与本工程的对应见 2.0。
+除特别注明外，所有命令均在上位机新终端执行，每个常驻进程独占一个终端，
+机器人保持上电。两侧仓库与执行位置：
 
-**软件部分（已完成，代码已并入 `src/main.cpp`，编译通过）**：透传与运动控制
-融合为三任务 `micro_ros_task` / `bridge_task` / `loop`，待整机实测。
+- 上位机（ROS 2 侧）：远程仓库 `YuXiangROS-jazzy-learning`，本地工作空间
+  `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`（下称 Robot_ws），2.1~2.5 的
+  ros2 / colcon 命令均在此执行（新终端先 `source install/setup.bash`）；
+- 下位机（ESP32-S3 固件侧）：远程仓库 `YuxiangROS-PIO-learning`（本仓库），
+  仅 2.1 前置的固件烧录涉及。
 
-**建图 / 导航（未开始）**：基于 `/scan` 进行建图与导航。
+### 2.0 原书代码清单与本工程对应
 
-整机实测的联调顺序：先 `micro_ros_agent`（udp4:8888，运动控制 UDP 中转）→ 再
-tcp_server → 最后 ydlidar，详见 README「激光雷达转接」节。
+| 原书清单 | 内容                   | 本工程对应                                                   |
+| -------- | ---------------------- | ------------------------------------------------------------ |
+| 9-55     | fishbot.urdf           | robot_description/urdf/fishbot.urdf，TF 静态链来源           |
+| 9-57     | urdf2tf.launch.py      | robot_description/launch/urdf2tf.launch.py                   |
+| 9-59     | 启动 urdf2tf           | 见 2.1 步骤 1                                                |
+| 9-60     | odom2tf.cpp            | robot_bringup/src/odom2tf.cpp，可执行名 odom2tf              |
+| 9-62     | bringup.launch.py      | robot_bringup/launch/bringup.launch.py，ydlidar 延时 5s 启动 |
+| 9-63     | slam_toolbox 在线建图  | 见 2.3，默认帧参数与本工程 TF 链一致                         |
+| 9-64     | map_saver_cli 保存地图 | 见 2.4，保存后拷入 maps/ 并重新编译                          |
+| 9-65     | 复制 nav2 参数模板     | config/nav2_params.yaml 已存在，参数修改见 2.5               |
+| 9-66     | 启动导航               | 包名为 robot_navigation2，见 2.5                             |
+
+### 2.1 分步联调：构建 TF 链与上下位互通（原书 9-55~9-61 路径）
+
+分步目的：逐段验证 TF 与话题，出问题时能定位到段。前置（下位机侧，本仓库）：
+烧录融合固件 `pio run -e esp32-s3-devkitc-1 -t upload`；其余步骤均在上位机。
+上位机与 ESP32 同网段。
+
+#### 步骤 1（终端 1）：启动 urdf2tf（原书 9-59）
+
+```bash
+ros2 launch robot_description urdf2tf.launch.py
+```
+
+验证：`ros2 run tf2_tools view_frames` 生成 frames.pdf，应出现
+base_footprint → base_link → laser_link 静态链。
+
+#### 步骤 2（终端 2）：启动 micro_ros_agent，随后给机器人上电
+
+```bash
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+```
+
+验证：agent 打印上下位机连接成功；另开终端 `ros2 topic hz /odom` 约 20Hz
+（融合固件发布，TF：odom → base_footprint）。
+
+#### 步骤 3（终端 3）：启动 odom2tf 节点（原书 9-60 的可执行）
+
+```bash
+ros2 run robot_bringup odom2tf
+```
+
+#### 步骤 4（终端 4）：rqt_tf_tree 验证完整 TF 链
+
+```bash
+ros2 run rqt_tf_tree rqt_tf_tree
+```
+
+预期一条完整链：odom → base_footprint → base_link → laser_link
+（前段来自 odom2tf，后段来自 urdf2tf）。
+
+### 2.2 一键联调（原书 9-62）与整机实测 T1~T3（上位机）
+
+分步验证通过后，改用 bringup 一键入口（agent + urdf2tf + odom2tf +
+tcp_server + ydlidar 串起；因雷达驱动依赖串口转 WiFi 驱动，ydlidar 用
+TimerAction 延时 5s 启动，与分步等价）。先重新构建再运行：
+
+```bash
+colcon build --packages-select robot_bringup
+ros2 launch robot_bringup bringup.launch.py
+```
+
+随后给机器人重新上电，在各节点正常运行后检查各话题和 TF 结构
+（原书 9-62 段落），检查项：
+
+| 步骤    | 操作                            | 判定                                             |
+| ------- | ------------------------------- | ------------------------------------------------ |
+| T1 运动 | bringup 后 pub /cmd_vel         | 底盘响应；`ros2 topic hz /odom` 约 20Hz          |
+| T2 雷达 | bringup 已含 tcp_server+ydlidar | `ros2 topic hz /scan` 不低于 13Hz（best_effort） |
+| T3 压测 | T1+T2 同时运行 5 分钟以上       | 频率稳定；无 TCP 重连风暴；`/odom` 连续无中断    |
+
+### 2.3 建图（原书 9-63）（上位机）
+
+终端安排：终端 1 保持 bringup 运行，终端 2 启动 slam_toolbox，终端 3 遥控：
+
+```bash
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=False
+```
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+说明：slam_toolbox 默认 base_frame=base_footprint、odom_frame=odom、
+scan_topic=/scan，与本工程 TF 链一致，无需自定义配置；遥控慢速走遍场地，
+slam_toolbox 只消费数据不产生运动。可选另开终端 rviz2（Fixed Frame 设 map、
+添加 /map 显示）观察建图质量。
+
+### 2.4 保存地图并入库（原书 9-64）（上位机）
+
+建图满意后，在任意终端（工作目录即保存位置）执行：
+
+```bash
+ros2 run nav2_map_server map_saver_cli -f room
+cp room.pgm room.yaml <Robot_ws>/src/robot_navigation2/maps/
+colcon build --packages-select robot_navigation2
+```
+
+注意：`navigation2.launch.py` 默认从 install 空间的 `maps/room.yaml`
+加载地图，不拷贝、不重编译则 map_server 加载失败。
+
+### 2.5 导航（原书 9-65 / 9-66）（上位机）
+
+前置：关闭 slam_toolbox——建图与定位都发布 map→odom TF，并存会冲突。
+
+修改 `config/nav2_params.yaml`（原书 9-65 模板的既有拷贝）：
+
+- MPPI FollowPath `vx_max`: 0.5 → 0.25；velocity_smoother `max_velocity`:
+  [0.5, 0.0, 2.0] → [0.25, 0.0, 1.6]（底盘实际极速约 0.2~0.3 m/s）；
+- `inflation_radius`: 0.7 → 0.35（local_costmap 与 global_costmap 两处）。
+
+启动（原书 9-66，包名为 robot_navigation2，终端 1 保持 bringup）：
+
+```bash
+ros2 launch robot_navigation2 navigation2.launch.py use_sim_time:=False
+```
+
+随后 rviz2 用 2D Pose Estimate 给 AMCL 初始位姿（不给则定位发散），再用
+Nav2 Goal 下发目标点，观察路径跟踪与避障。
+
+### 2.6 执行顺序总览
+
+```text
+2.1 分步联调 → 2.2 一键联调+T1~T3 → 2.3 建图 → 2.4 存图入库 → 2.5 导航
+```

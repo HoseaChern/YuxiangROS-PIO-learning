@@ -222,23 +222,9 @@ pio run -e test01_motor -t upload
 （TCP client 主动连上位机 8889），上位机零改动即可替换。接线：雷达 Tx → GPIO14
 （UART1 RX，115200）、M_CTR → GPIO13（PWM 10kHz）。
 
-当前进度（按任务界限划分）：
-
-| 阶段   | 内容                                                     | 状态                           |
-| ------ | -------------------------------------------------------- | ------------------------------ |
-| 阶段一 | 独立透传固件 `test09_bridge` 打通链路，`/scan` 约 13.7Hz | 已完成                         |
-| 阶段二 | 融合固件 `main.cpp`（软件完成）→ 建图 / 导航             | 进行中（软件完成，建图未开始） |
-
-关键差异与根因：
-
-- 雷达电机由 ESP32 PWM 驱动，上位机 `ydlidar.yaml` 必须 `support_motor_dtr: false`
-  ——原书转接板自带电机调速，而本方案若沿用 SDK 的 DTR 控制，电平无法穿透 TCP/pty
-  透传链路，电机不会转；
-- 联调顺序：先启动上位机 `tcp_server`（创建 `/tmp/tty_laser`），再
-  `ros2 launch ydlidar_ros2 ydlidar_a1.launch.py`；订阅 `/scan` 需 best_effort QoS
-  （`echo/hz` 加 `--qos-reliability best_effort`，rviz2 的 QoS Policy 改 Sensor Data）；
-- 完整接线、调试时序（先启动谁、再启动谁、观察谁）与排错，见
-  [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md)。
+阶段一透传调试记录与阶段二建图 / 导航完整流程（上位机 / 下位机两侧仓库、
+各终端启动顺序、原书代码清单 9-55~9-66 对照、参数适配与排错），统一见
+[docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md)。
 
 ## 自主优化
 

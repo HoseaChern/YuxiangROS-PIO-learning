@@ -242,26 +242,10 @@ motor), keeping the same interface contract as the original adapter (TCP client
 actively connects to the host port 8889), so the host side is unchanged. Wiring:
 lidar Tx -> GPIO14 (UART1 RX, 115200), M_CTR -> GPIO13 (PWM 10 kHz).
 
-Current progress (split by task boundary):
-
-| Phase   | Content                                                        | Status                              |
-| ------- | ------------------------------------------------------------- | ----------------------------------- |
-| Phase 1 | standalone passthrough `test09_bridge`, `/scan` ~13.7 Hz       | Done                                |
-| Phase 2 | merged into `main.cpp` (software done) -> mapping / navigation | In progress (software done, map TBD) |
-
-Key differences and root causes:
-
-- the lidar motor is driven by ESP32 PWM, so `ydlidar.yaml` must set
-  `support_motor_dtr: false` — the book's adapter board has its own motor speed
-  control, but if the SDK's DTR control were used here the level cannot travel
-  through the TCP/pty passthrough link and the motor would not spin;
-- bring-up order: start `tcp_server` on the host first (it creates
-  `/tmp/tty_laser`), then `ros2 launch ydlidar_ros2 ydlidar_a1.launch.py`;
-  subscribing to `/scan` needs best-effort QoS (`echo/hz` with
-  `--qos-reliability best_effort`, rviz2 QoS Policy = Sensor Data);
-- full wiring, bring-up sequence (what starts first, what to observe) and
-  troubleshooting: see
-  [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md).
+For the phase-1 passthrough debugging record and the full phase-2 mapping /
+navigation workflow (both repos, terminal-by-terminal startup order, mapping to
+the book's listings 9-55 ~ 9-66, parameter adaptation and troubleshooting), see
+[docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md).
 
 ## Optimizations
 
