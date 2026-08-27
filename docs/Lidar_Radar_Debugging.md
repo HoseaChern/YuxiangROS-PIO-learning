@@ -134,7 +134,7 @@ tcp_server（第 2 步）创建。
 - **rviz2 详细设定**（按顺序操作）：
 
   1. 启动：`rviz2`；
-  2. 左上角 Global Options → Fixed Frame 改为 `laser_frame`（与
+  2. 左上角 Global Options → Fixed Frame 改为 `laser_link`（与
      `ydlidar_ros2/params/ydlidar.yaml` 的 `frame_id` 一致）；
   3. Displays 面板 → Add → By topic → 选择 `/scan`（类型 LaserScan）→ OK；
   4. **在 Displays 面板展开刚添加的 LaserScan 项 → 展开 Topic → 把 QoS Policy
@@ -176,6 +176,17 @@ micro_ros_agent（那是阶段二融合固件的 UDP 中转）**，一键入口�
 
 上位机约 5s 无数据交换会断开连接；固件持续转发雷达数据并每 1s 重连
 （`BRIDGE_RECONNECT_MS`）。
+
+#### 1.4.5 `/scan` 的 frame_id 必须与 URDF 雷达 link 名一致
+
+`ydlidar.yaml` 的 `frame_id` 已由 `laser_frame` 改为 `laser_link`，与
+`fishbot.urdf` 中雷达 link 名对齐（改动已在鱼香ROS仓库本地 fishbot 分支
+提交）。原因：TF 树中雷达坐标系只有 `base_footprint → base_link →
+laser_link` 这一条来源链，驱动若发布 `frame_id: laser_frame` 的
+`/scan`，该坐标系在 TF 中无任何变换来源。话题层测试（`hz`/`echo`）
+不受影响，但 rviz 点云会报 "No transform from laser_frame"，
+slam_toolbox 建图查询 scan→base 变换时必然失败——建图前务必保证
+scan 的 frame_id 可在 TF 树中解析。
 
 ### 1.5 排错速查（阶段一实际踩点）
 
