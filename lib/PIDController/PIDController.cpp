@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-// C++11: 静态 constexpr 成员类外定义, 避免 ODR-use 链接错误
+// static constexpr 类外定义，避免 C++11 ODR-use 链接错误
 constexpr float PIDController::INTEGRAL_SUP_LIMIT;
 
 void PIDController::update_pid(float kp, float ki, float kd) {
@@ -16,57 +16,47 @@ void PIDController::output_limit(float limit) { output_limit_ = limit; }
 void PIDController::update_target(float target) { target_ = target; }
 
 /**
- * @brief 更新PID控制器, 核心算法实现
- * 
+ * @brief 更新 PID 控制器（数值微分变体）
  * @param current 当前值
- * @return int16_t PWM 输出值, 范围 ±output_limit_, 四舍五入取整
+ * @return PWM 输出，四舍五入取整，范围 ±output_limit_
  */
 int16_t PIDController::update_pwm(float current) {
-    // 计算误差及其变化率
-    float error = target_ - current; // 计算误差
-    d_error_ = error_last_ - error;  // 微分项误差 (上次误差 - 当前误差)
-    error_last_ = error;             // 更新上一次误差为当前误差
+    float error = target_ - current;
+    d_error_ = error - error_last_; // D 项差分 e_k - e_{k-1}
+    error_last_ = error;
 
-    // 计算积分项并进行积分限制
-    error_sum_ += error; // 计算积分项
-    error_sum_ = std::fmax(-INTEGRAL_SUP_LIMIT, std::fmin(INTEGRAL_SUP_LIMIT, error_sum_));
+    error_sum_ += error;
+    error_sum_ =
+        std::fmax(-INTEGRAL_SUP_LIMIT, std::fmin(INTEGRAL_SUP_LIMIT, error_sum_)); // 积分限幅
 
-    // 计算输出并进行输出限制
     float output = kp_ * error + ki_ * error_sum_ + kd_ * d_error_;
-    output = std::fmax(-output_limit_, std::fmin(output_limit_, output));
+    output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
 
-    // 四舍五入取整: 直接截断 (static_cast<int16_t>) 会让 99.6 -> 99, 低速时占空比系统性偏小;
-    // 四舍五入后 99.6 -> 100, 负数同样处理 (-99.6 -> -100)。输出已被 output_limit_
-    // 限幅为 ±output_limit_ (远小于 int16_t 范围), 此转换无溢出风险。
+    // 四舍五入，避免向零截断导致低速占空比系统性偏小
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
 }
 
 /**
- * @brief 更新PID控制器 (外部微分变体)
+ * @brief 更新 PID 控制器（外部微分变体）
  *
- * 与 update_pwm 的区别: 微分项不由误差数值差分获得, 而由调用方通过 inputs 数组
- * 直接提供测量量的变化率 (如陀螺仪角速度), 避免对含噪测量做数值微分放大噪声。
- * 标准公式中 d(error)/dt = -d(measurement)/dt, 故微分项取 -Kd * measurement_rate。
- * P/I 逻辑与 update_pwm 完全一致并共享同一积分状态;
- * 同一实例请勿混用两种更新方式。
+ * 数学形式与 update_pwm 一致（u = kp·e + ki·Σe + kd·d_error），D 项同为 Δe，仅计算来源不同。
+ * 为什么: 对含噪测量做数值微分会把噪声放大约 1/T，改用传感器变化率规避。
+ * 符号: e = target - measurement，故 D 项 Δe = -(measurement 的变化率)，即取测量变化率的相反数。
  *
- * @param inputs 输入数组, [PID_INPUT_MEASUREMENT]=测量值,
- *               [PID_INPUT_RATE]=测量量变化率 (与测量值同量纲, 以秒为单位)
- * @return int16_t PWM 输出值, 范围 ±output_limit_, 四舍五入取整
+ * @param inputs [PID_INPUT_MEASUREMENT]=测量值, [PID_INPUT_RATE]=测量变化率
+ * @return PWM 输出，四舍五入取整，范围 ±output_limit_
  */
 int16_t PIDController::update_pwm_with_rate(const float inputs[2]) {
-    // 计算误差 (微分项使用外部变化率, 不做数值差分, 不更新 error_last_)
     float error = target_ - inputs[PID_INPUT_MEASUREMENT];
+    d_error_ = -inputs[PID_INPUT_RATE]; // D 项 Δe = -(测量 y 的变化率) = e_k - e_{k-1}
 
-    // 计算积分项并进行积分限制 (与 update_pwm 一致)
     error_sum_ += error;
-    error_sum_ = std::fmax(-INTEGRAL_SUP_LIMIT, std::fmin(INTEGRAL_SUP_LIMIT, error_sum_));
+    error_sum_ =
+        std::fmax(-INTEGRAL_SUP_LIMIT, std::fmin(INTEGRAL_SUP_LIMIT, error_sum_)); // 积分限幅
 
-    // 计算输出并进行输出限制: 微分项 = -Kd * 测量变化率
-    float output = kp_ * error + ki_ * error_sum_ - kd_ * inputs[PID_INPUT_RATE];
-    output = std::fmax(-output_limit_, std::fmin(output_limit_, output));
+    float output = kp_ * error + ki_ * error_sum_ + kd_ * d_error_;
+    output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
 
-    // 四舍五入取整, 处理方式与 update_pwm 一致
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
 }
 
