@@ -56,34 +56,34 @@ $$
 e_k - e_{k-1}
 $$
 
-为什么可以用角速度表示？因为角速度的定义是单位时间的角度变化，且机械中值恒定不变。代入公式：
+为什么可以用角速度表示？因为角速度的定义是单位时间的角度变化，且机械中值恒定不变。代入公式（`θ` 记为当前时刻 `θ_k`，`θ'` 记为上一时刻 `θ_{k-1}`）：
 
 $$
-e_k = \theta_0 - \theta
-$$
-
-$$
-e_{k-1} = \theta_0 - \theta'
+e_k = \theta_0 - \theta_k
 $$
 
 $$
-e_k - e_{k-1} = (\theta_0 - \theta) - (\theta_0 - \theta') = \theta_0 - \theta - \theta_0 + \theta'
+e_{k-1} = \theta_0 - \theta_{k-1}
 $$
 
-于是误差差分可直接用角速度替代：
-
 $$
-e_k - e_{k-1} = \omega \qquad (\omega:\text{陀螺仪返回实际角速度})
+e_k - e_{k-1} = (\theta_0 - \theta_k) - (\theta_0 - \theta_{k-1}) = \theta_{k-1} - \theta_k = -(\theta_k - \theta_{k-1})
 $$
 
-**为何直接采用角速度**：PD 控制算法是离散的，每间隔固定时间计算一次，正好也是单位时间。虽然这里计算出的并不是实际角速度（因为计算间隔不是 1 秒），但 Kd 系数最后是要去调整的，和实际角速度是成比例的。为了减少程序的运算量，这里就直接采用陀螺仪输出的角速度即可。
+于是误差差分与「角速度」是**相反数**关系：
+
+$$
+e_k - e_{k-1} = -\omega \qquad (\omega:\text{陀螺仪返回实际角速度})
+$$
+
+**为何直接采用角速度**：PD 控制算法是离散的，每间隔固定时间计算一次。虽然这里计算出的并不是实际角速度（因为计算间隔不是 1 秒），但 Kd 系数最后是要去调整的，和实际角速度是成比例的。为了减少程序的运算量，这里就直接采用陀螺仪输出的角速度 `ω`；与之相对，误差差分取 `-ω`（负号将并入 Kd）。
 
 #### 1.5 最终直立环公式
 
-将上面的公式整合得到实际的 PD 公式。
+将上面的公式整合（注意微分项由误差差分推导出的是 `-ω`，故 Kd 项系数为负）得到实际的 PD 公式：
 
 $$
-\mathrm{PWM} = K_p \cdot (\theta_0 - \theta) + K_d \cdot \omega
+\mathrm{PWM} = K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega
 $$
 
 #### 1.6 变量与符号约定
@@ -96,7 +96,9 @@ $$
 | `K_p`          | `BALANCE_KP`     | 比例增益，单位 `PWM/deg`     | 待实测整定             |
 | `K_d`          | `BALANCE_KD`     | 微分增益，单位 `PWM/(deg/s)` | 待实测整定             |
 
-公式中的 `θ` 和 `ω` 由陀螺仪采集返回给单片机，`Zero` 由我们手动测得。
+公式中的 `θ` 和 `ω` 由陀螺仪采集返回给单片机，`Zero` 由我们手动测得。注意 Kd 项系数为负（见 1.4 推导），与标准 PID 中「误差差分 `e_k - e_{k-1}`」方向一致——因为该差分等于 `-ω`。
+
+代码中该 D 项由 `PIDController::update_pwm_with_rate` 实现：其内部取 `d_error = -rate`（`rate` 即 `ω`），代入 `u_k = K_p·e_k + K_d·d_error` 恰得 `K_p*(θ₀-θ) - K_d*ω`。
 
 ### 2. 固件工程实现
 
@@ -104,22 +106,25 @@ $$
 
 #### 2.1 核心算法
 
+直立环 PD 直接交由 `PIDController` 库实现（外部微分变体），不再手写，也无额外封装函数。完整调用（源码见 `src/tests/test10_upright/main.cpp`）：
+
 ```cpp
-// 每 5ms 控制周期: 读 IMU 后调用直立环 PD (源码见 src/tests/test10_upright/main.cpp)
+// setup: 配置 P/I/D 增益与输出限幅 (直立环无 I 项, BALANCE_KI = 0)
+balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
+balance_pid.output_limit(BALANCE_PWM_LIMIT);
+
+// 每 5ms 控制周期: 读 IMU 后直接调用库计算直立环输出
 const float theta = mpu.getAngleY();   // theta: 陀螺仪返回实际角度 (deg)
 const float omega = mpu.getGyroY();    // omega: 陀螺仪返回实际角速度 (deg/s)
 
-int16_t upright_pd(float theta, float omega) {
-    const float error = zero_pitch_deg - theta;         // e_k    = Zero - theta
-    float pwm = BALANCE_KP * error + BALANCE_KD * omega; // PWM  = Kp*e_k + Kd*omega
-    pwm = std::fmax(-BALANCE_PWM_LIMIT,
-                    std::fmin(BALANCE_PWM_LIMIT, pwm));  // 输出限幅
-    return static_cast<int16_t>(pwm >= 0.0f ? pwm + 0.5f : pwm - 0.5f); // 四舍五入
-}
+balance_pid.update_target(zero_pitch_deg);              // 目标 = 机械中值 Zero
+const float inputs[2] = { theta, omega };               // [测量值, 变化率]
+const int16_t pwm_balance = balance_pid.update_pwm_with_rate(inputs); // = Kp*(Zero-θ) - Kd*ω
 ```
 
 - `zero_pitch_deg` 为 `Zero`（机械中值），初始取自 `config.h` 的 `BALANCE_ZERO_PITCH_DEG`，可由串口 `'c'` 在线标定。
-- 输出限幅到 `±BALANCE_PWM_LIMIT`，对齐 MCPWM 占空比范围；因 `static_cast<int16_t>` 向零截断，故对 `pwm` 先做四舍五入。
+- `update_pwm_with_rate` 内部取 `d_error = -rate`（`rate` 即 `ω`），输出 `Kp*(θ₀-θ) - Kd*ω`，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
+- 起控进入 `kRunning` 前调用 `balance_pid.reset()`，清零上一拍的误差差分/积分，避免停车或标定期间的残留影响首次输出。
 - **极性检验先于调参**：手扶车体前倾，轮子应向车头方向追；若反向，对调 `config.h` 中该电机 `PIN_A/PIN_B` 定义（或利用 `'d'` 自检命令验证）。
 
 #### 2.2 引脚与节拍
@@ -147,29 +152,13 @@ int16_t upright_pd(float theta, float omega) {
 
 #### 2.5 调试记录
 
-**"平放一直前进"根因与修复**
+##### "平放一直前进"根因与修复
 
 根因：MPU6050_light 的角度基准是上电校准时刻的姿态——平放上电，平放即恒读 0°，旧版 `|theta|<8°` 起控条件被永久满足，一上电就闭环；而 `ZERO_PITCH=0` 未标定真实直立中值，P 项恒有偏差输出，单向漂移狂奔；前进加速度的反作用力矩使车身后仰，松手即倒。
 
 修复：上电默认停止，串口命令显式控制启停（`'s'`），并在起控前复位控制状态。
 
-**终端乱码问题**
-
-根因是 `pio run -t upload` 成功后会自动打开串口监视器，显示 ESP32 ROM boot 的 74880 波特率乱码。固件无问题，烧录命令加 `--no-monitor`：
-
-```bash
-pio run -e test10_upright -t upload --no-monitor
-```
-
-**调参顺序**
-
-1. 直立环 `K_p`：从 25 起调至出现低频振荡；
-2. 直立环 `K_d`：从 0.5 加至振荡消失、手感变"硬"；
-3. 每次只动一个参数。
-
-实测静止站立的平均 `theta` 填入 `BALANCE_ZERO_PITCH_DEG`（或用 `'c'` 在线标定）。
-
-**推荐调试流程**
+##### 推荐调试流程
 
 1. 平放静置上电，等校准完成提示；
 2. 发 `d` 确认轮子转向朝车头（极性物理验证）；

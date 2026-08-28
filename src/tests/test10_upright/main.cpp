@@ -6,7 +6,8 @@
  *       串口命令: s=启停 / c=标定机械中值 / d=极性自检。
  *
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 直立环公式):
- *       PWM = Kp * (Zero - theta) + Kd * omega
+ *       PWM = Kp * (Zero - theta) - Kd * omega
+ *   即 Kp*e_k - Kd*omega, D 项系数为负 (陀螺仪角速度, 见 1.4 符号推导)。
  *   其中 theta = mpu.getAngleY() (陀螺仪返回实际角度),
  *        omega = mpu.getGyroY()  (陀螺仪返回实际角速度),
  *        Zero  = zero_pitch_deg  (机械中值, 'c' 在线标定)。
@@ -22,6 +23,7 @@
 
 #include <cmath>
 
+#include <PIDController.h>
 #include <SemanticEnums.h>
 
 #include "config.h"
@@ -43,6 +45,7 @@ enum class BalanceState : uint8_t {
 
 Esp32McpwmMotor motor;                            // 电机驱动对象
 MPU6050 mpu(Wire);                                // MPU6050 对象, 使用 Wire 作为 I2C 总线
+PIDController balance_pid;                        // 直立环 PD 控制器 (P/I/D 参数在 setup 中配置)
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
 float zero_pitch_deg = BALANCE_ZERO_PITCH_DEG;    // 机械中值 Zero, 可由 'c' 命令在线标定
@@ -86,6 +89,11 @@ void setup() {
     // 初始化两路电机
     motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
     motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
+
+    // 配置直立环 PD 控制器: P=I*0+D (直立环无 I 项), 输出限幅对齐 MCPWM 占空比范围
+    // update_pwm_with_rate 的 D 项取 -rate, 传陀螺仪角速度即得 -Kd*omega (见 1.4 符号推导)
+    balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
+    balance_pid.output_limit(BALANCE_PWM_LIMIT);
 
     // 创建控制任务: 5ms 固定节拍, 钉在 core1 避开 core0 的 WiFi 协议栈抖动
     xTaskCreatePinnedToCore(
@@ -152,28 +160,6 @@ void handle_serial_command(float theta) {
 }
 
 /**
- * @brief 直立环 PD 输出: 严格复现 PWM = Kp*(Zero - theta) + Kd*omega
- *
- * 从控制理论到代码的逐符号对应 (见 docs/Balance_Car_Notes.md 1.5 最终直立环公式):
- *   - theta: 陀螺仪返回实际角度 (mpu.getAngleY)
- *   - omega: 陀螺仪返回实际角速度 (mpu.getGyroY)
- *   - Zero : 机械中值 (zero_pitch_deg, 'c' 在线标定)
- *   - error = Zero - theta            (e_k)
- *   - pwm   = Kp * error + Kd * omega (PWM)
- *
- * @param theta 当前角 (deg)
- * @param omega 当前角速度 (deg/s)
- * @return 限幅后的 PWM (四舍五入取整)
- */
-int16_t upright_pd(float theta, float omega) {
-    const float error = zero_pitch_deg - theta;          // e_k = Zero - theta
-    float pwm = BALANCE_KP * error + BALANCE_KD * omega; // PWM = Kp*e_k + Kd*omega
-    pwm = std::fmax(-BALANCE_PWM_LIMIT, std::fmin(BALANCE_PWM_LIMIT, pwm)); // 输出限幅
-    // 四舍五入, 避免向零截断导致低速占空比系统性偏小
-    return static_cast<int16_t>(pwm >= 0.0f ? pwm + 0.5f : pwm - 0.5f);
-}
-
-/**
  * @brief 单周期控制步骤: 读 IMU -> 命令处理 -> 标定/自检/状态机 -> PD 输出 -> 文本打印
  *
  * 由 balance_task 以 5ms 固定节拍调用。内部顺序即完整控制链路:
@@ -222,6 +208,7 @@ void control_step() {
             motor.updateMotorSpeed(MOTOR_RIGHT, 0);
             // 起控条件: 已武装 且 |theta - Zero| 进入起控窗口 -> 起控
             if (balance_armed && fabsf(theta - zero_pitch_deg) <= BALANCE_ARM_ANGLE_DEG) {
+                balance_pid.reset(); // 清零 PID 内部状态 (error 差分/积分), 避免上次残留
                 balance_state = BalanceState::kRunning;
                 Serial.println("[STATE] running");
             }
@@ -236,8 +223,12 @@ void control_step() {
                 break;
             }
 
-            // 直立环输出: PWM = Kp*(Zero - theta) + Kd*omega
-            pwm_balance = upright_pd(theta, omega);
+            // 直立环输出: PWM = Kp*(Zero - theta) - Kd*omega (见 2.1)
+            // 交由 PIDController.update_pwm_with_rate 计算: D 项内取 -rate(=omega),
+            // 输出限幅 + 四舍五入取整均由库完成。
+            balance_pid.update_target(zero_pitch_deg);              // 目标 = 机械中值 Zero
+            const float inputs[2] = {theta, omega};                 // [测量值, 变化率]
+            pwm_balance = balance_pid.update_pwm_with_rate(inputs); // = Kp*(Zero-θ) - Kd*ω
             motor.updateMotorSpeed(MOTOR_LEFT, pwm_balance);
             motor.updateMotorSpeed(MOTOR_RIGHT, pwm_balance);
             break;

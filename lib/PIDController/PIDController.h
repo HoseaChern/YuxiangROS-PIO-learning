@@ -31,7 +31,7 @@ class PIDController {
     void update_pid(float kp, float ki, float kd); // 设定 P/I/D 增益，不重置内部状态
     void output_limit(float limit);                // 设定对称输出限幅 ±limit
     void update_target(float target);              // 设定目标值
-    int16_t update_pwm(float current);             // 数值微分变体：D 项取误差差分 Δe = e_k - e_{k-1}
+    int16_t update_pwm(float current); // 数值微分变体：D 项取误差差分 Δe = e_k - e_{k-1}
     // 外部微分变体：数学形式同 update_pwm，D 项 Δe 取测量(y)变化率的相反数(-rate)
     // inputs: [PID_INPUT_MEASUREMENT]=测量值, [PID_INPUT_RATE]=测量(y)变化率
     int16_t update_pwm_with_rate(const float inputs[2]);
