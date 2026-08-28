@@ -1,6 +1,7 @@
 #ifndef PIDCONTROLLER_H
 #define PIDCONTROLLER_H
 
+#include <SemanticEnums.h>
 #include <cstdint>
 
 /**
@@ -37,6 +38,10 @@ class PIDController {
     void output_limit(float limit);                // 设置输出限幅, 对称限制在 [-limit, limit]
     void update_target(float target);              // 更新目标值
     int16_t update_pwm(float current); // 提供当前值, 返回 PWM 输出值 (int16_t, 范围 ±output_limit_)
+    // 外部微分变体: 微分项由调用方提供测量变化率, 见实现处注释
+    // inputs: [PID_INPUT_MEASUREMENT]=测量值, [PID_INPUT_RATE]=测量量变化率(以秒为单位)
+    int16_t update_pwm_with_rate(const float inputs[2]);
+    void reset(); // 清零内部状态 (误差累积和/微分项/上次误差), 用于重新起控前复位
 };
 
 #endif // PIDCONTROLLER_H

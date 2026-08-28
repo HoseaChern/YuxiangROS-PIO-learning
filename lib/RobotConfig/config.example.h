@@ -96,8 +96,8 @@ constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, �
 
 // ---- 雷达透传任务参数 (主环境融合固件: bridge_task) ----
 
-constexpr uint32_t BRIDGE_STACK_SIZE = 8192;     // bridge_task 任务栈字节数
-constexpr uint8_t BRIDGE_TASK_PRIO = 1;          // bridge_task 任务优先级
+constexpr uint32_t BRIDGE_STACK_SIZE = 8192; // bridge_task 任务栈字节数
+constexpr uint8_t BRIDGE_TASK_PRIO = 1;      // bridge_task 任务优先级
 
 // ---- 话题与节点 ----
 
@@ -110,15 +110,39 @@ constexpr char ODOM_TOPIC[] = "/odom";                 // 里程计话题名
 //   VCC(5V) -> 电源 5V; GND -> GND; Tx -> 本固件 UART RX; M_CTR -> PWM 调速
 // 注意: X2L 无数据 RX 引脚, 数据仅从 Tx 出 (单通道)。
 
-constexpr uint8_t LIDAR_UART_RX_PIN = 14;    // 雷达 Tx -> ESP32 UART1 RX (普通 GPIO, 避开 strapping)
+constexpr uint8_t LIDAR_UART_RX_PIN = 14; // 雷达 Tx -> ESP32 UART1 RX (普通 GPIO, 避开 strapping)
 constexpr uint8_t LIDAR_MOTOR_CTRL_PIN = 13; // 雷达 M_CTR 电机调速 (LEDC PWM 输出)
 constexpr uint32_t LIDAR_BAUD = 115200;      // 雷达串口波特率 (与上位机 ydlidar.yaml 一致)
 constexpr uint32_t LIDAR_PWM_FREQ = 10000;   // M_CTR PWM 频率, 单位 Hz (X2L 手册规格典型值 10kHz)
 constexpr uint8_t LIDAR_PWM_RES = 8;         // M_CTR PWM 分辨率, 单位 bit
 constexpr uint8_t LIDAR_PWM_CHANNEL = 0;     // M_CTR LEDC 通道号 (test09 独占, 取 0)
-constexpr uint32_t LIDAR_MOTOR_SPEED = 89;   // M_CTR 初始占空比 35% (89/255, 对齐 X2L 手册 PWM 典型值)
+constexpr uint32_t LIDAR_MOTOR_SPEED =
+    89; // M_CTR 初始占空比 35% (89/255, 对齐 X2L 手册 PWM 典型值)
 
-constexpr uint16_t BRIDGE_TCP_PORT = 8889;   // 上位机 ros_serial2wifi tcp_server 端口
+constexpr uint16_t BRIDGE_TCP_PORT = 8889;     // 上位机 ros_serial2wifi tcp_server 端口
 constexpr uint32_t BRIDGE_RECONNECT_MS = 1000; // TCP 断线重连间隔, 单位 ms
+
+// ---- 两轮自平衡 (test10_balance 直立环固件) ----
+// I2C 引脚从 N16R8 空闲集合 {3,46,9,10,11,12} 中选取:
+//   避开 strapping 引脚 3/46, 取 9/10 (无其他复用冲突); MPU6050 模块板载上拉电阻
+
+constexpr uint8_t IMU_SDA_PIN = 10;           // MPU6050 SDA
+constexpr uint8_t IMU_SCL_PIN = 9;            // MPU6050 SCL
+
+constexpr uint32_t BALANCE_PERIOD_MS = 5;     // 控制节拍, 单位 ms (200Hz, 三环统一节拍)
+constexpr uint32_t BALANCE_STACK_SIZE = 4096; // balance_task 任务栈字节数
+constexpr uint8_t BALANCE_TASK_PRIO = 5;      // 任务优先级 (硬实时控制, 高于网络类任务)
+constexpr uint8_t BALANCE_TASK_CORE = 1;      // 任务核心号 (避开 core0 的 WiFi 协议栈抖动)
+
+constexpr float BALANCE_KP = 25.0f;          // 直立环比例增益, 单位 PWM/deg (经验起点, 待实测整定)
+constexpr float BALANCE_KI = 0.0f;           // 直立环积分增益 (直立环不用 I, 相位滞后致振荡)
+constexpr float BALANCE_KD = 0.5f;           // 直立环微分增益, 单位 PWM/(deg/s), D 项用陀螺仪角速度
+constexpr float BALANCE_PWM_LIMIT = 255.0f;  // 直立环输出限幅, 对齐 MCPWM 占空比范围
+constexpr float BALANCE_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身静止站立的平均 pitch 后修正
+
+constexpr float BALANCE_ARM_ANGLE_DEG = 8.0f;  // 起控阈值: |pitch| 小于该值才使能输出
+constexpr float BALANCE_FALL_ANGLE_DEG = 45.0f; // 倒地保护阈值: |pitch| 大于该值立即停机
+constexpr uint32_t BALANCE_CALM_DELAY_MS = 2000; // 校准前静置时长, 单位 ms
+constexpr uint32_t BALANCE_PRINT_MS = 100;       // 调试打印周期, 单位 ms
 
 #endif // ROBOTCONFIG_H
