@@ -143,6 +143,7 @@ constexpr float BALANCE_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身�
 constexpr float BALANCE_ARM_ANGLE_DEG = 8.0f;    // 起控阈值: |pitch| 小于该值才使能输出
 constexpr float BALANCE_FALL_ANGLE_DEG = 45.0f;  // 倒地保护阈值: |pitch| 大于该值立即停机
 constexpr uint32_t BALANCE_CALM_DELAY_MS = 2000; // 校准前静置时长, 单位 ms
-constexpr uint32_t BALANCE_PRINT_MS = 100;       // 调试打印周期, 单位 ms
+constexpr uint16_t BALANCE_CALIB_CYCLES = 40;    // 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
+constexpr uint32_t BALANCE_PRINT_MS = 100; // 状态打印周期, 100ms = 10Hz; 打印判定见其使用处 if 判断
 
 #endif // ROBOTCONFIG_H
