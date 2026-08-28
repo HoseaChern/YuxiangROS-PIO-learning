@@ -109,7 +109,7 @@
 - **micro-ROS 只声明在使用它的环境**（主环境、test06/07/08）：其 `extra_script.py`
   构建钩子在被安装的环境无条件执行（注入宏、链接预编译 `libmicroros`），无法用
   `lib_ignore` 阻止，故不能装进无关环境。
-- **IntelliSense 兜底 include**：`MPU6050_light` 只装在 example04 / test10_balance
+- **IntelliSense 兜底 include**：`MPU6050_light` 只装在 example04 / test10_upright
   环境，公共段加 `-I` 指向其头文件，保证任何激活环境下 IDE 都能解析该头
   （编译层面多余但无害）。
 - **配置与凭据分离**：引脚、标定参数、WiFi 凭据、Agent IP/端口等共用编译期常量
@@ -144,7 +144,7 @@ YuxiangROS-PIO-learning/
 ├── src/
 │   ├── main.cpp                 # 主固件：micro-ROS 运动控制 + 激光雷达透传（单板融合）
 │   ├── examples/                # 4 个示例固件（example01~04）
-│   └── tests/                   # 10 个测试固件（test01~10，含透传 test09_bridge 与自平衡 test10_balance）
+│   └── tests/                   # 10 个测试固件（test01~09 与直立 test10_upright）
 ├── docs/                        # 学习笔记与调试记录（含激光雷达接入全流程）
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ 工具链规范
 └── platformio.ini               # 15 环境工程配置
@@ -157,7 +157,7 @@ YuxiangROS-PIO-learning/
 | Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07/08/10 |
 | Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07/08    |
 | micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07/08                |
-| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04、test10_balance           |
+| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04、test10_upright           |
 
 > 为何用 fishros 预编译镜像：官方
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -196,7 +196,7 @@ pio run -e test01_motor -t upload
 | 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                         |
 | 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                         |
 | 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                         |
-| 测试   | test10_balance       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md） |
+| 测试   | test10_upright       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md） |
 
 ## 运行与联调
 
@@ -279,7 +279,7 @@ mkdir -p .pio/ccdbs
 for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
-           test07_Subscription test08_Publisher test09_bridge test10_balance; do
+           test07_Subscription test08_Publisher test09_bridge test10_upright; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py

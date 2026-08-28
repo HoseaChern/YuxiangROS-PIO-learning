@@ -126,7 +126,7 @@ buildable projects, one-to-one:
   is installed (injects macros, links the prebuilt `libmicroros`), so it must not
   be installed into unrelated environments.
 - **IntelliSense fallback include**: `MPU6050_light` is only installed in the
-  example04 / test10_balance environments; a common-section `-I` points at its
+  example04 / test10_upright environments; a common-section `-I` points at its
   header so the IDE can resolve it under any active environment (harmless for
   compilation).
 - **Config & credential separation**: shared compile-time constants (pins,
@@ -162,7 +162,7 @@ YuxiangROS-PIO-learning/
 ├── src/
 │   ├── main.cpp                 # main firmware: micro-ROS motion control + lidar passthrough (single-board merge)
 │   ├── examples/                # 4 example firmwares (example01~04)
-│   └── tests/                   # 10 test firmwares (test01~10, incl. passthrough test09_bridge & balance test10_balance)
+│   └── tests/                   # 10 test firmwares (test01~09 & test10_upright)
 ├── docs/                        # study notes & debugging records (incl. lidar integration)
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ toolchain conventions
 └── platformio.ini               # 15-environment configuration
@@ -175,7 +175,7 @@ YuxiangROS-PIO-learning/
 | Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08/10 |
 | Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08    |
 | micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08                |
-| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04, test10_balance         |
+| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04, test10_upright         |
 
 > Why the fishros prebuilt mirror: the official
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -214,7 +214,7 @@ pio run -e test01_motor -t upload
 | Test    | test07_Subscription  | `/cmd_vel` subscription + motion control test                                              |
 | Test    | test08_Publisher     | `/cmd_vel` subscription + `/odom` publishing (migrated from the main firmware)             |
 | Test    | test09_bridge        | lidar UART -> WiFi TCP passthrough (ESP32-S3 as the adapter board)                         |
-| Test    | test10_balance       | two-wheel self-balancing upright loop PD (MPU6050, phase 1; see docs/Balance_Car_Notes.md) |
+| Test    | test10_upright       | two-wheel self-balancing upright loop PD (MPU6050, phase 1; see docs/Balance_Car_Notes.md) |
 
 ## Running and Integration
 
@@ -314,7 +314,7 @@ mkdir -p .pio/ccdbs
 for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
-           test07_Subscription test08_Publisher test09_bridge test10_balance; do
+           test07_Subscription test08_Publisher test09_bridge test10_upright; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py
