@@ -83,6 +83,26 @@ int16_t PIDController::update_pwm_speed(float target, float measurement) {
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
 }
 
+/**
+ * @brief 更新转向环 PID 控制器（开环转动变体）
+ *
+ * 数学形式 u = kp·target，与文档转向环 5.3 模式 B「期望转向-开环」公式 Δ = Kp·θ_target 对应。
+ * 为什么:
+ *   开环: 期望转角为外部指令（遥控/上位机的模糊转角），无 yaw 反馈（docs 5.4: 六轴无绝对航向）;
+ *   无积分: 转向存在偏航偏移与车轮滑动误差，"消静差"收益甚微反而引入漂移（docs 5.3）;
+ *   无微分: 抑制转向（模式 A，纯 D 阻尼 Δ = -kd·ωz）复用 update_pwm（target=0）实现，本方法只管开环映射。
+ *   注意: 本方法不读不写 error_sum_/d_error_/error_last_，reset() 对其无影响。
+ *
+ * @param target 期望转角 θ_target（deg，开环外部指令）
+ * @return PWM 输出（差速量 Δ），四舍五入取整，范围 ±output_limit_
+ */
+int16_t PIDController::update_pwm_turn_openloop(float target) {
+    float output = kp_ * target;                                          // 开环: Δ = kp·θ_target
+    output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
+
+    return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
+}
+
 void PIDController::reset() {
     error_sum_ = 0.0f;
     d_error_ = 0.0f;

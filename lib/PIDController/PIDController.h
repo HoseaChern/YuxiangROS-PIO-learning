@@ -40,6 +40,9 @@ class PIDController {
     // 速度环变体：PI 控制（无 D 项），数学形式 u = kp*e + ki*Σe
     // target=期望速度, measurement=编码器反馈速度；与直立环为独立方法，串级嵌套由调用方实现
     int16_t update_pwm_speed(float target, float measurement);
+    // 转向环变体（开环转动）：纯比例，数学形式 u = kp*target，即 Δ = kp*θ_target（docs 5.3 模式 B）
+    // target=期望转角(开环外部指令, 非精确航向)；无反馈/积分/微分；抑制转向(模式 A)复用 update_pwm
+    int16_t update_pwm_turn_openloop(float target);
 
     void reset(); // 清零内部状态，重新起控前调用
 };

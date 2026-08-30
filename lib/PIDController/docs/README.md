@@ -137,6 +137,7 @@ PID 三项不必然全部使用。例如小车直立平衡为追求快速响应�
 | `update_pwm(current)`                   | 数值微分变体：$D$ 项 $\Delta e$ 取误差差分 $e_k - e_{k-1}$                           |
 | `update_pwm_upright(target, inputs)`    | 直立环变体：纯 PD，外部微分，$\Delta e$ 取角速度的相反数 $-\omega$；目标角度直接入参 |
 | `update_pwm_speed(target, measurement)` | 速度环变体：纯 PI，$u = K_p e + K_i' \sum e$                                         |
+| `update_pwm_turn_openloop(target)`      | 转向环变体（开环转动）：纯比例，$u = K_p \cdot \theta_{target}$；无反馈/积分/微分    |
 | `reset()`                               | 清零内部状态，重新起控前调用                                                         |
 
 ### 2.4 使用示例
