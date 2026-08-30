@@ -37,24 +37,47 @@ int16_t PIDController::update_pwm(float current) {
 }
 
 /**
- * @brief 更新 PID 控制器（外部微分变体）
+ * @brief 更新直立环 PID 控制器（纯 PD）
  *
- * 数学形式与 update_pwm 一致（u = kp·e + ki·Σe + kd·d_error），D 项同为 Δe，仅计算来源不同。
- * 为什么: 对含噪测量做数值微分会把噪声放大约 1/T，改用传感器变化率规避。
- * 符号: e = target - measurement，故 D 项 Δe = -(measurement 的变化率)，即取测量变化率的相反数。
+ * 数学形式 u = kp·e + kd·d_error。
+ * 为什么:
+ *   D 项外部微分: 对含噪角度做数值微分会把噪声放大约 1/T，改用陀螺仪角速度规避;
+ *   符号 e = target - angle，故 Δe = -(角速度)，即取角速度的相反数。
  *
- * @param inputs [PID_INPUT_MEASUREMENT]=测量值, [PID_INPUT_RATE]=测量变化率
+ * @param target 期望角度（直立环目标，如 theta_0 或 速度环输出 + theta_0）
+ * @param inputs [PID_INPUT_ANGLE]=角度, [PID_INPUT_ANGULAR_RATE]=角速度
  * @return PWM 输出，四舍五入取整，范围 ±output_limit_
  */
-int16_t PIDController::update_pwm_with_rate(const float inputs[2]) {
-    float error = target_ - inputs[PID_INPUT_MEASUREMENT];
-    d_error_ = -inputs[PID_INPUT_RATE]; // D 项 Δe = -(测量 y 的变化率) = e_k - e_{k-1}
+int16_t PIDController::update_pwm_upright(float target, const float inputs[2]) {
+    float error = target - inputs[PID_INPUT_ANGLE];
+    d_error_ = -inputs[PID_INPUT_ANGULAR_RATE]; // D 项 Δe = -角速度 = e_k - e_{k-1}
+
+    float output = kp_ * error + kd_ * d_error_;                          // 纯 PD
+    output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
+
+    return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);
+}
+
+/**
+ * @brief 更新速度环 PID 控制器（纯 PI）
+ *
+ * 数学形式 u = kp·e + ki·Σe，与文档速度环公式 output = Kp'·(v_set - v) + Ki'·Σe_j 对应。
+ * 为什么:
+ *   速度调节希望平缓连续，舍去微分（D）项以防高频振动（见 docs 速度环 3.1）。
+ *   与 update_pwm_upright 保持独立方法：串级嵌套（速度环输出 → 直立环目标）由调用方实现。
+ *
+ * @param target 期望速度 v_set
+ * @param measurement 编码器反馈速度 v
+ * @return PWM 输出，四舍五入取整，范围 ±output_limit_
+ */
+int16_t PIDController::update_pwm_speed(float target, float measurement) {
+    float error = target - measurement; // e_k = v_set - v
 
     error_sum_ += error;
     error_sum_ =
         std::fmax(-INTEGRAL_SUP_LIMIT, std::fmin(INTEGRAL_SUP_LIMIT, error_sum_)); // 积分限幅
 
-    float output = kp_ * error + ki_ * error_sum_ + kd_ * d_error_;
+    float output = kp_ * error + ki_ * error_sum_;                        // 纯 PI
     output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
 
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);

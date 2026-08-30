@@ -134,16 +134,17 @@ constexpr uint32_t BALANCE_STACK_SIZE = 4096; // balance_task 任务栈字节数
 constexpr uint8_t BALANCE_TASK_PRIO = 5;      // 任务优先级 (硬实时控制, 高于网络类任务)
 constexpr uint8_t BALANCE_TASK_CORE = 1;      // 任务核心号 (避开 core0 的 WiFi 协议栈抖动)
 
-constexpr float BALANCE_KP = 25.0f;         // 直立环比例增益, 单位 PWM/deg (经验起点, 待实测整定)
-constexpr float BALANCE_KI = 0.0f;          // 直立环积分增益 (直立环不用 I, 相位滞后致振荡)
-constexpr float BALANCE_KD = 0.5f;          // 直立环微分增益, 单位 PWM/(deg/s), D 项用陀螺仪角速度
-constexpr float BALANCE_PWM_LIMIT = 255.0f; // 直立环输出限幅, 对齐 MCPWM 占空比范围
+constexpr float BALANCE_KP = 25.0f; // 直立环比例增益, 单位 PWM/deg (经验起点, 待实测整定)
+constexpr float BALANCE_KI = 0.0f;  // 直立环积分增益 (库层强制纯 PD 忽略 ki_, 此处仅占位勿改)
+constexpr float BALANCE_KD = 0.5f;  // 直立环微分增益, 单位 PWM/(deg/s), D 项用陀螺仪角速度
+constexpr float BALANCE_PWM_LIMIT = 255.0f;    // 直立环输出限幅, 对齐 MCPWM 占空比范围
 constexpr float BALANCE_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身静止站立的平均 pitch 后修正
 
 constexpr float BALANCE_ARM_ANGLE_DEG = 8.0f;    // 起控阈值: |pitch| 小于该值才使能输出
 constexpr float BALANCE_FALL_ANGLE_DEG = 45.0f;  // 倒地保护阈值: |pitch| 大于该值立即停机
 constexpr uint32_t BALANCE_CALM_DELAY_MS = 2000; // 校准前静置时长, 单位 ms
-constexpr uint16_t BALANCE_CALIB_CYCLES = 40;    // 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
+constexpr uint16_t BALANCE_CALIB_CYCLES =
+    40;                                    // 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
 constexpr uint32_t BALANCE_PRINT_MS = 100; // 状态打印周期, 100ms = 10Hz; 打印判定见其使用处 if 判断
 
 #endif // ROBOTCONFIG_H

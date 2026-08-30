@@ -21,10 +21,10 @@ enum MotorID : uint8_t { MOTOR_LEFT = 0, MOTOR_RIGHT = 1 };
 enum VelocityID : uint8_t { VEL_LINEAR = 0, VEL_ANGULAR = 1 };
 
 /**
- * @brief PID输入标识: 测量值/测量(y)变化率
+ * @brief PID输入标识: 角度/角速度
  *
- * 用于 update_pwm_with_rate() 的 inputs 数组下标, 区分外部微分模式的两个输入维度。
+ * 用于 update_pwm_upright() 的 inputs 数组下标, 区分直立环的两个输入维度: 角度 theta / 角速度 omega。
  */
-enum PidInputID : uint8_t { PID_INPUT_MEASUREMENT = 0, PID_INPUT_RATE = 1 };
+enum PidInputID : uint8_t { PID_INPUT_ANGLE = 0, PID_INPUT_ANGULAR_RATE = 1 };
 
 #endif // SEMANTIC_ENUMS_H

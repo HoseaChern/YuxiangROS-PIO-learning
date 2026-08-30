@@ -100,7 +100,7 @@ $$
 
 公式中的 \(\theta\) 和 \(\omega\) 为控制坐标（为取负后的陀螺仪读数），\(\theta_0\) 由我们手动测得。注意 \(K_d\) 项系数为负（见 1.4 推导），与标准 PID 中「误差差分 \(e_k - e_{k-1}\)」方向一致——因为该差分等于 \(-\omega\)。
 
-代码中该 D 项由 `PIDController::update_pwm_with_rate` 实现：其内部取 `d_error = -rate`（`rate` 即 \(\omega\)），代入 \(u_k = K_p \cdot e_k + K_d \cdot d\_error\) 恰得 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)。
+代码中该 D 项由 `PIDController::update_pwm_upright` 实现：其内部取 `d_error = -rate`（`rate` 即 \(\omega\)），代入 \(u_k = K_p \cdot e_k + K_d \cdot d\_error\) 恰得 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)。
 
 ### 2. 固件工程实现
 
@@ -111,7 +111,7 @@ $$
 直立环 PD 直接交由 `PIDController` 库实现（外部微分变体），不再手写，也无额外封装函数。完整调用（源码见 `src/tests/test10_upright/main.cpp`）：
 
 ```cpp
-// setup: 配置 P/I/D 增益与输出限幅 (直立环无 I 项, BALANCE_KI = 0)
+// setup: 配置 P/I/D 增益与输出限幅 (直立环为纯 PD, 库层强制无 I 项, BALANCE_KI 仅占位)
 balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
 balance_pid.output_limit(BALANCE_PWM_LIMIT);
 
@@ -119,14 +119,14 @@ balance_pid.output_limit(BALANCE_PWM_LIMIT);
 const float theta = -mpu.getAngleY();  // 控制俯仰角(前倾为正): 前进方向为 -X, 读取处取负
 const float omega = -mpu.getGyroY();   // 控制角速度(前倾方向为正)
 
-balance_pid.update_target(zero_pitch_deg);              // 目标 = 机械中值 theta_0 (zero_pitch_deg)
-const float inputs[2] = { theta, omega };               // [测量值, 变化率]
-const int16_t pwm_balance = balance_pid.update_pwm_with_rate(inputs); // = Kp*(theta_0 - theta) - Kd*omega
+const float inputs[2] = { theta, omega };               // [角度, 角速度]
+// update_pwm_upright: 目标角度直接入参 (此处为机械中值 theta_0; 串级时改为 速度环输出 + theta_0)
+const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, inputs); // = Kp*(theta_0 - theta) - Kd*omega
 ```
 
 - `zero_pitch_deg` 即符号 \(\theta_0\)（机械中值），初始取自 `config.h` 的 `BALANCE_ZERO_PITCH_DEG`，可由串口 `'c'` 在线标定。
-- `theta`、`omega` 在读取处取负，统一「前倾为正」的控制坐标（见 1.6 方向约定），使被测角速度经 `update_pwm_with_rate` 内部 `d_error = -rate` 后恰好得到 \(-K_d \cdot \omega\)。
-- `update_pwm_with_rate` 内部取 `d_error = -rate`（`rate` 即取负后的 \(\omega\)），输出 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
+- `theta`、`omega` 在读取处取负，统一「前倾为正」的控制坐标（见 1.6 方向约定），使被测角速度经 `update_pwm_upright` 内部 `d_error = -rate` 后恰好得到 \(-K_d \cdot \omega\)。
+- `update_pwm_upright` 内部取 `d_error = -rate`（`rate` 即取负后的 \(\omega\)），输出 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
 - 起控进入 `kRunning` 前调用 `balance_pid.reset()`，清零上一拍的误差差分/积分，避免停车或标定期间的残留影响首次输出。
 - **极性校验先于调参（人工串口观察）**：手扶车体前倾，轮子应向车头方向追；若反向，对调 `config.h` 中该电机 `PIN_A/PIN_B` 定义。可从串口状态行 `theta` 变化趋势与 `pwm` 符号人工判断方向（已移除自检命令，见 2.3）。
 
@@ -170,7 +170,85 @@ const int16_t pwm_balance = balance_pid.update_pwm_with_rate(inputs); // = Kp*(t
 
 ## 速度环
 
-速度环负责控制小车前后运动速度。目标：给定期望线速度（编码器反馈 + PI 控制），通过调整直立环的平衡点角度来驱动小车，而不能直接调 PWM。此环尚未实现，留空待补。
+速度环负责控制小车前后运动速度。目标：给定期望速度（编码器反馈 + PI 控制），通过调整直立环的平衡点角度来驱动小车，而不能直接调 PWM。串级 PID 结构下，速度环为**外环**，其输出作为直立环（内环）的期望角度输入。控制理论见下，固件实现随阶段 2 补充。
+
+### 3. 控制理论
+
+#### 3.1 PI 控制回路
+
+速度调节过程中希望速度变化平缓且连续，因此舍去微分控制（D 项），以防高频振动现象产生。速度环采用 **PI 控制器**，与直立环构成串级 PID：外环为速度环，速度环的输出作为内环（直立环）的输入，内环直接作用到驱动器；这里外环的输出值表示**期望的角度值**。
+
+信号流向如下：
+
+1. 给定**期望速度** \(v_{set}\)（目标编码器速度）；
+2. 与**编码器反馈速度** \(v\) 相减得误差 \(e_k = v_{set} - v\)；
+3. 速度环 PI 控制器输出 `output`（期望角度增量）；
+4. 将 `output` 叠加到机械中值 \(\theta_0\) 上，作为直立环 PD 控制器的输入（期望角度）；
+5. 直立环输出 PWM 直接作用到驱动器。
+
+**为何速度反馈直接用编码器数值**：速度的定义是单位时间内物体的位移。物理世界的 m/s 单位与编码器数值呈比例关系，为计算简便，直接采用编码器数值在单位时间内的变化量表示速度。又因为 PI 计算公式是按固定周期计算的，且编码器在固定时间内读取后直接清零，因此直接读取编码器数值就可以表示速度。
+
+#### 3.2 PI 控制回路公式推导
+
+通过控制回路写出如下公式，标准 PID：
+
+$$
+u_k = K_p \cdot e_k + K_i \cdot \sum_{j=0}^{k} e_j + K_d \cdot (e_k - e_{k-1})
+$$
+
+速度环只取比例控制与积分控制（舍去微分，见 3.1），因此公式简化为：
+
+$$
+u_k = K_p' \cdot e_k + K_i' \cdot \sum_{j=0}^{k} e_j
+$$
+
+定义速度误差为期望速度与实际速度之差：
+
+$$
+e_k = v_{set} - v \qquad (\text{误差值} = \text{期望速度} - \text{实际速度})
+$$
+
+将上面的公式整合得到实际的 PI 公式（速度环）：
+
+$$
+\mathrm{output} = K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j
+$$
+
+#### 3.3 串级控制公式推导
+
+将速度环与直立环串联，推导完整控制公式。
+
+① 直立环：
+
+$$
+\mathrm{PWM} = K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega
+$$
+
+② 速度环（见 3.2）：
+
+$$
+\mathrm{output} = K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j
+$$
+
+③ 将 \(\mathrm{output} + \theta_0\) 作为直立环的输入代入①：由于速度环输出的期望角度是基于机械中值基础的，因此需要加上 \(\theta_0\) 之后再带入——直立环的输入就是机械中值，因此用 \(\mathrm{output} + \theta_0\) 替换 \(\theta_0\)：
+
+$$
+\mathrm{PWM} = K_p \cdot \left( (\mathrm{output} + \theta_0) - \theta \right) - K_d \cdot \omega
+$$
+
+④ 将上式展开并代回速度环，得到双环完整公式：
+
+$$
+\mathrm{PWM} = K_p \cdot \left[ K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j \right] + K_p \cdot \theta_0 - K_p \cdot \theta - K_d \cdot \omega
+$$
+
+展开后的绿色部分正是速度环项，红色部分正是直立环项：
+
+$$
+\mathrm{PWM} = \underbrace{K_p \cdot K_p' \cdot (v_{set} - v) + K_p \cdot K_i' \cdot \sum_{j=0}^{k} e_j}_{\color{green}{\text{速度环项}}} + \underbrace{K_p \cdot \theta_0 - K_p \cdot \theta - K_d \cdot \omega}_{\color{red}\text{直立环项}}
+$$
+
+因此这个双环 PID 的控制代码，相当于把两个环的输出结果求和后传入电机驱动器。
 
 ## 转向环
 

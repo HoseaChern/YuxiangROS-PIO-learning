@@ -85,8 +85,8 @@ void setup() {
     motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
     motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
 
-    // 配置直立环 PD 控制器: P=I*0+D (直立环无 I 项), 输出限幅对齐 MCPWM 占空比范围
-    // update_pwm_with_rate 的 D 项取 -rate, 传陀螺仪角速度即得 -Kd*omega (见 1.4 符号推导)
+    // 配置直立环 PD 控制器: 库层强制纯 PD 无 I 项 (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比范围
+    // update_pwm_upright 的 D 项取 -rate, 传陀螺仪角速度即得 -Kd*omega (见 1.4 符号推导)
     balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
     balance_pid.output_limit(BALANCE_PWM_LIMIT);
 
@@ -207,10 +207,10 @@ void control_step() {
         }
 
         // 直立环输出: PWM = Kp*(theta_0 - theta) - Kd*omega
-        balance_pid.update_target(zero_pitch_deg); // 目标 = 机械中值 theta_0
-
-        const float inputs[2] = {theta, omega};                 // [测量值, 变化率]
-        pwm_balance = balance_pid.update_pwm_with_rate(inputs); // = Kp*(theta_0 - theta) - Kd*omega
+        // update_pwm_upright 目标角度直接入参: 此处为机械中值 theta_0
+        const float inputs[2] = {theta, omega}; // [当前角度, 当前角速度]
+        // = Kp*(theta_0 - theta) - Kd*omega
+        pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, inputs);
 
         motor.updateMotorSpeed(MOTOR_LEFT, pwm_balance);
         motor.updateMotorSpeed(MOTOR_RIGHT, pwm_balance);

@@ -32,9 +32,15 @@ class PIDController {
     void output_limit(float limit);                // 设定对称输出限幅 ±limit
     void update_target(float target);              // 设定目标值
     int16_t update_pwm(float current); // 数值微分变体：D 项取误差差分 Δe = e_k - e_{k-1}
-    // 外部微分变体：数学形式同 update_pwm，D 项 Δe 取测量(y)变化率的相反数(-rate)
-    // inputs: [PID_INPUT_MEASUREMENT]=测量值, [PID_INPUT_RATE]=测量(y)变化率
-    int16_t update_pwm_with_rate(const float inputs[2]);
+
+    // 直立环变体：纯 PD（库层强制无 I 项，忽略 ki_ 不累加积分），D 项 Δe 取角速度的相反数(-omega)
+    // target 为期望角度直接入参（串级时 = 速度环输出 + theta_0，动态变化，故不入内部状态）
+    // inputs: [PID_INPUT_ANGLE]=角度(theta), [PID_INPUT_ANGULAR_RATE]=角速度(omega)
+    int16_t update_pwm_upright(float target, const float inputs[2]);
+    // 速度环变体：PI 控制（无 D 项），数学形式 u = kp*e + ki*Σe
+    // target=期望速度, measurement=编码器反馈速度；与直立环为独立方法，串级嵌套由调用方实现
+    int16_t update_pwm_speed(float target, float measurement);
+
     void reset(); // 清零内部状态，重新起控前调用
 };
 

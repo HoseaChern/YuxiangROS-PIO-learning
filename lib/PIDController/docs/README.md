@@ -2,8 +2,6 @@
 
 位置式 PID 控制器库，为电机速度环/直立环提供闭环控制。纯算法层，仅依赖 `<cstdint>` 与 `<cmath>`，不触碰 Arduino 头文件与硬件外设，便于单元测试与跨平台移植。历次优化记录已并入仓库根目录 README.md。
 
-> 数学公式使用 LaTeX 渲染（支持 KaTeX/MathJax 的预览器可正确显示）。
-
 ## 1. 数学原理
 
 本节忠实于标准 PID 控制理论。当前实现即按此理论构造，实现细节见「2. 库介绍」。
@@ -131,14 +129,15 @@ PID 三项不必然全部使用。例如小车直立平衡为追求快速响应�
 
 ### 2.3 公共接口
 
-| 方法                           | 说明                                                                   |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `update_pid(kp, ki, kd)`       | 设定 $P/I/D$ 增益，不重置内部状态                                      |
-| `output_limit(limit)`          | 设定对称输出限幅 ±limit                                                |
-| `update_target(target)`        | 设定目标值                                                             |
-| `update_pwm(current)`          | 数值微分变体：$D$ 项 $\Delta e$ 取误差差分 $e_k - e_{k-1}$             |
-| `update_pwm_with_rate(inputs)` | 外部微分变体：形式同左，$\Delta e$ 取测量( $y$ )变化率的相反数 $-rate$ |
-| `reset()`                      | 清零内部状态，重新起控前调用                                           |
+| 方法                                    | 说明                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------ |
+| `update_pid(kp, ki, kd)`                | 设定 $P/I/D$ 增益，不重置内部状态                                                    |
+| `output_limit(limit)`                   | 设定对称输出限幅 ±limit                                                              |
+| `update_target(target)`                 | 设定目标值（数值微分变体用）                                                         |
+| `update_pwm(current)`                   | 数值微分变体：$D$ 项 $\Delta e$ 取误差差分 $e_k - e_{k-1}$                           |
+| `update_pwm_upright(target, inputs)`    | 直立环变体：纯 PD，外部微分，$\Delta e$ 取角速度的相反数 $-\omega$；目标角度直接入参 |
+| `update_pwm_speed(target, measurement)` | 速度环变体：纯 PI，$u = K_p e + K_i' \sum e$                                         |
+| `reset()`                               | 清零内部状态，重新起控前调用                                                         |
 
 ### 2.4 使用示例
 
@@ -164,4 +163,5 @@ int16_t pwm = pid.update_pwm(current_speed);
 
 - `update_pid()` 不重置内部状态，历史保留。
 - 构造后须先 `output_limit()` 设定限幅，否则输出恒为 0（默认 `output_limit_ = 0.0f`）。
-- 同一实例勿混用 `update_pwm` 与 `update_pwm_with_rate`（共享积分状态；两者 $D$ 项数学量同为 $\Delta e$，仅计算来源不同）。
+- 同一实例勿混用多个更新变体（共享积分状态）；直立环与速度环应各用独立实例。
+- 串级嵌套在调用方实现：速度环输出 + $\theta_0$ 作为 `update_pwm_upright` 的 `target` 入参，两方法类内互不调用。
