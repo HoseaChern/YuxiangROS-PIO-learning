@@ -2,7 +2,7 @@
 
 在鱼香 ROS 差速底盘（`fishbot_motion_control`）基础上加装 MPU6050，拆下从动轮，整车退化为一级倒立摆，通过电机闭环控制实现两轮自平衡。
 
-本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前仅完成直立环，速度环与转向环留空待补。
+本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前已完成直立环（`test10_upright`）与速度环（`test11_speed`），转向环留空待补。
 
 ## 直立环
 
@@ -170,7 +170,7 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, input
 
 ## 速度环
 
-速度环负责控制小车前后运动速度。目标：给定期望速度（编码器反馈 + PI 控制），通过调整直立环的平衡点角度来驱动小车，而不能直接调 PWM。串级 PID 结构下，速度环为**外环**，其输出作为直立环（内环）的期望角度输入。控制理论见下，固件实现随阶段 2 补充。
+速度环负责控制小车前后运动速度。目标：给定期望速度（编码器反馈 + PI 控制），通过调整直立环的平衡点角度来驱动小车，而不能直接调 PWM。串级 PID 结构下，速度环为**外环**，其输出作为直立环（内环）的期望角度输入。控制理论见下，固件实现见 4。
 
 ### 3. 控制理论
 
@@ -249,6 +249,63 @@ $$
 $$
 
 因此这个双环 PID 的控制代码，相当于把两个环的输出结果求和后传入电机驱动器。
+
+### 4. 固件工程实现
+
+速度环固件为 `src/tests/test11_speed`，在 `test10_upright` 直立环基础上新增编码器测速与速度环 PI，构成串级。核心控制算法严格按 3.3 的公式逐符号复现，见 4.1。
+
+#### 4.1 核心算法
+
+速度环输出经 `PIDController::update_pwm_speed` 计算（PI 变体，无 D 项），再与机械中值叠加作为直立环目标角度，交由 `update_pwm_upright`（纯 PD）。完整调用（源码见 `src/tests/test11_speed/main.cpp`）：
+
+```cpp
+// setup: 配置速度环 PI (外环, 无 D 项) 与直立环 PD (内环, 库层强制纯 PD)
+speed_pid.update_pid(SPEED_KP, SPEED_KI, 0.0f);
+speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
+balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
+balance_pid.output_limit(BALANCE_PWM_LIMIT);
+
+// 每 5ms 控制周期: 读 IMU + 编码器测速 (两轮平均, mm/s)
+const float theta = -mpu.getAngleY();       // 控制俯仰角(前倾为正)
+const float omega = -mpu.getGyroY();        // 控制角速度(前倾方向为正)
+const float speed_mm_s = measure_speed_mm_s(); // 差值法同 test03, 单位 mm/s
+
+// 速度环 (外环, PI): output = Kp'*(v_set - v) + Ki'*Σe, 输出为期望角度增量 (deg)
+const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
+
+// 串级嵌套: 直立环目标角度 = 速度环输出 + 机械中值 theta_0 (docs 3.3 公式 ③)
+const float target_angle = static_cast<float>(speed_output) + zero_pitch_deg;
+
+// 直立环 (内环, PD): = Kp*(target_angle - theta) - Kd*omega
+const float inputs[2] = { theta, omega }; // [角度, 角速度]
+const int16_t pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
+```
+
+- 测速实现 `measure_speed_mm_s()`：每控制周期读两路编码器 tick 差值，乘以单脉冲距离并除以时间差得 mm/s（与 `test03_speed_trans` 同法），左右轮平均作为车体前进速度 \(v\)。
+- `target_speed_mm_s` 即符号 \(v_{set}\)（期望速度，mm/s），初始取自 `config.h` 的 `SPEED_SETPOINT_MM_S`，串口 `'w'`/`'x'` 按 `SPEED_STEP_MM_S` 步进调整，`'v'` 回显。
+- `update_pwm_speed` 输出经四舍五入取整为 `int16_t`，故期望角度增量分辨率为 1°；`SPEED_OUTPUT_LIMIT` 限制目标角偏离 \(\theta_0\) 的幅度，防止外环积分饱和时目标角过大而失衡。
+- 起控进入 `kRunning` 前同时 `reset()` 速度环与直立环（清积分/差分状态），避免停车期间的积分残留。
+- 两环均为 `PIDController` 独立实例，方法类内互不调用，串级嵌套在 `control_step` 调用方实现。
+
+#### 4.2 串口命令
+
+| 命令 | 功能             | 说明                                            |
+| ---- | ---------------- | ----------------------------------------------- |
+| `s`  | 启停武装切换     | 同 test10                                       |
+| `c`  | 机械中值在线标定 | 同 test10                                       |
+| `w`  | 目标速度 +步进   | 每按一次 `target_speed_mm_s += SPEED_STEP_MM_S` |
+| `x`  | 目标速度 -步进   | 每按一次 `target_speed_mm_s -= SPEED_STEP_MM_S` |
+| `v`  | 回显目标速度     | 打印当前 `target_speed_mm_s`                    |
+
+#### 4.3 状态机与安全
+
+与 test10 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；速度环在 `kRunning` 内恒生效（目标速度默认 0，即先验证纯直立，再 `'w'` 提速）。倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。
+
+#### 4.4 调参指南
+
+1. 先在 `SPEED_SETPOINT_MM_S = 0` 下验证直立环（此时速度环无扰动，行为同 test10）；
+2. 发 `'w'` 给正速度，观察车体是否前倾加速并稳定在目标速度附近；若振荡，减小 `SPEED_KP`；若速度收敛过慢或存在稳态偏差，增大 `SPEED_KI`；
+3. 编码器方向校验：前进时串口 `speed` 应为正；若为负，反接编码器 `PIN_A/PIN_B`（同电机极性约定）。
 
 ## 转向环
 

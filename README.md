@@ -26,7 +26,7 @@
   - [激光雷达转接（与原书不同的路）](#激光雷达转接与原书不同的路)
   - [自主优化](#自主优化)
   - [开发环境](#开发环境)
-    - [compile\_commands.json 生成（15 环境合并）](#compile_commandsjson-生成15-环境合并)
+    - [compile\_commands.json 生成（16 环境合并）](#compile_commandsjson-生成16-环境合并)
   - [致谢与参考](#致谢与参考)
   - [许可证](#许可证)
 
@@ -110,8 +110,8 @@
   构建钩子在被安装的环境无条件执行（注入宏、链接预编译 `libmicroros`），无法用
   `lib_ignore` 阻止，故不能装进无关环境。
 - **IntelliSense 兜底 include**：`MPU6050_light` 只装在 example04 / test10_upright
-  环境，公共段加 `-I` 指向其头文件，保证任何激活环境下 IDE 都能解析该头
-  （编译层面多余但无害）。
+  / test11_speed 环境，公共段加 `-I` 指向其头文件，保证任何激活环境下 IDE 都能
+  解析该头（编译层面多余但无害）。
 - **配置与凭据分离**：引脚、标定参数、WiFi 凭据、Agent IP/端口等共用编译期常量
   集中于 `lib/RobotConfig/config.h`（本地副本，不入库），模板见 `config.example.h`；
   调整硬件接线/部署环境不会污染 git 工作区。
@@ -144,20 +144,20 @@ YuxiangROS-PIO-learning/
 ├── src/
 │   ├── main.cpp                 # 主固件：micro-ROS 运动控制 + 激光雷达透传（单板融合）
 │   ├── examples/                # 4 个示例固件（example01~04）
-│   └── tests/                   # 10 个测试固件（test01~09 与直立 test10_upright）
+│   └── tests/                   # 11 个测试固件（test01~09 与直立/串级 test10_upright、test11_speed）
 ├── docs/                        # 学习笔记与调试记录（含激光雷达接入全流程）
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ 工具链规范
-└── platformio.ini               # 15 环境工程配置
+└── platformio.ini               # 16 环境工程配置
 ```
 
 ## 依赖库
 
-| 库                   | 用途            | 来源                                                                 | 使用环境                            |
-| -------------------- | --------------- | -------------------------------------------------------------------- | ----------------------------------- |
-| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07/08/10 |
-| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07/08    |
-| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07/08                |
-| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04、test10_upright           |
+| 库                   | 用途            | 来源                                                                 | 使用环境                                |
+| -------------------- | --------------- | -------------------------------------------------------------------- | --------------------------------------- |
+| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)                | 主环境、test01/03/04/05/06/07/08/10/11  |
+| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)               | 主环境、test02/03/04/05/06/07/08/11     |
+| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio)（镜像版） | 主环境、test06/07/08                    |
+| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)                  | example04、test10_upright、test11_speed |
 
 > 为何用 fishros 预编译镜像：官方
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -180,23 +180,24 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| 类型   | 环境名               | 说明                                                                   |
-| ------ | -------------------- | ---------------------------------------------------------------------- |
-| 主固件 | esp32-s3-devkitc-1   | 运动控制 + 激光雷达透传（micro-ROS `/cmd_vel`、`/odom` + bridge_task） |
-| 示例   | example01_helloworld | Hello World                                                            |
-| 示例   | example02_LED        | LED 闪烁                                                               |
-| 示例   | example03_Ultrasound | 超声波测距                                                             |
-| 示例   | example04_IMU        | MPU6050 姿态解算                                                       |
-| 测试   | test01_motor         | 电机驱动测试                                                           |
-| 测试   | test02_encoder       | 编码器读取与标定                                                       |
-| 测试   | test03_speed_trans   | 速度换算测试                                                           |
-| 测试   | test04_PID           | PID 速度闭环测试                                                       |
-| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                                              |
-| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                                                |
-| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                         |
-| 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                         |
-| 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                         |
-| 测试   | test10_upright       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md） |
+| 类型   | 环境名               | 说明                                                                            |
+| ------ | -------------------- | ------------------------------------------------------------------------------- |
+| 主固件 | esp32-s3-devkitc-1   | 运动控制 + 激光雷达透传（micro-ROS `/cmd_vel`、`/odom` + bridge_task）          |
+| 示例   | example01_helloworld | Hello World                                                                     |
+| 示例   | example02_LED        | LED 闪烁                                                                        |
+| 示例   | example03_Ultrasound | 超声波测距                                                                      |
+| 示例   | example04_IMU        | MPU6050 姿态解算                                                                |
+| 测试   | test01_motor         | 电机驱动测试                                                                    |
+| 测试   | test02_encoder       | 编码器读取与标定                                                                |
+| 测试   | test03_speed_trans   | 速度换算测试                                                                    |
+| 测试   | test04_PID           | PID 速度闭环测试                                                                |
+| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                                                       |
+| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                                                         |
+| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                                  |
+| 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                                  |
+| 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                                  |
+| 测试   | test10_upright       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md）          |
+| 测试   | test11_speed         | 两轮自平衡串级：速度环 PI + 直立环 PD（阶段二；详见 docs/Balance_Car_Notes.md） |
 
 ## 运行与联调
 
@@ -268,7 +269,7 @@ pio run -e test01_motor -t upload
 
 仓库已入库 `.clangd`、`.clang-format`、`.clang-tidy` 三份规范（`.vscode/` 不入库）。
 
-### compile_commands.json 生成（15 环境合并）
+### compile_commands.json 生成（16 环境合并）
 
 `pio run -t compiledb` 每次只产出当前激活环境，故循环生成再合并去重（本机生成物，
 含绝对路径，不入库）：
@@ -279,7 +280,8 @@ mkdir -p .pio/ccdbs
 for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
-           test07_Subscription test08_Publisher test09_bridge test10_upright; do
+           test07_Subscription test08_Publisher test09_bridge test10_upright \
+           test11_speed; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py

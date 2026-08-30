@@ -122,7 +122,7 @@ constexpr uint32_t LIDAR_MOTOR_SPEED =
 constexpr uint16_t BRIDGE_TCP_PORT = 8889;     // 上位机 ros_serial2wifi tcp_server 端口
 constexpr uint32_t BRIDGE_RECONNECT_MS = 1000; // TCP 断线重连间隔, 单位 ms
 
-// ---- 两轮自平衡 (test10_upright 直立环固件) ----
+// ---- 两轮自平衡 (test10_upright 直立环 / test11_speed 串级固件) ----
 // I2C 引脚从 N16R8 空闲集合 {3,46,9,10,11,12} 中选取:
 //   避开 strapping 引脚 3/46, 取 9/10 (无其他复用冲突); MPU6050 模块板载上拉电阻
 
@@ -146,5 +146,16 @@ constexpr uint32_t BALANCE_CALM_DELAY_MS = 2000; // 校准前静置时长, 单�
 constexpr uint16_t BALANCE_CALIB_CYCLES =
     40;                                    // 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
 constexpr uint32_t BALANCE_PRINT_MS = 100; // 状态打印周期, 100ms = 10Hz; 打印判定见其使用处 if 判断
+
+// ---- 速度环参数 (test11_speed 串级固件) ----
+// 速度环为外环 (PI, 无 D), 输出为期望角度增量 (deg), 叠加到 theta_0 后作为直立环目标:
+//   target_angle = speed_output + theta_0, 对应 docs 3.3 串级公式 ③
+// 注意: update_pwm_speed 输出经四舍五入取整为 int16_t, 分辨率 1deg, 整定时留意
+
+constexpr float SPEED_KP = 2.0f; // 速度环比例增益, 单位 deg/(mm/s) (经验起点, 待实测整定)
+constexpr float SPEED_KI = 0.1f; // 速度环积分增益, 单位 deg/(mm/s)
+constexpr float SPEED_OUTPUT_LIMIT = 10.0f; // 速度环输出限幅 (角度增量, deg), 防目标角过大失衡
+constexpr float SPEED_SETPOINT_MM_S = 0.0f; // 默认目标速度, 单位 mm/s ('w'/'x' 串口调整)
+constexpr float SPEED_STEP_MM_S = 10.0f;    // 串口调速步进, 单位 mm/s ('w' 加 / 'x' 减)
 
 #endif // ROBOTCONFIG_H
