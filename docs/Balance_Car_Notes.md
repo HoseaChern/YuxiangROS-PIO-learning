@@ -2,7 +2,7 @@
 
 在鱼香 ROS 差速底盘（`fishbot_motion_control`）基础上加装 MPU6050，拆下从动轮，整车退化为一级倒立摆，通过电机闭环控制实现两轮自平衡。
 
-本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前已完成直立环（`test10_upright`）与速度环（`test11_speed`）的控制理论与固件；转向环控制理论已完成（见 5），固件实现留空待补。
+本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前已完成直立环（`test10_upright`）、速度环（`test11_speed`）与转向环（`test12_turn`）的控制理论与固件。
 
 ## 直立环
 
@@ -309,7 +309,7 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs)
 
 ## 转向环
 
-转向环负责控制小车转向。目标：给定期望角速度（gyro_z 或 yaw 误差 + P/PD），通过左右轮差速量实现转向。控制理论见 5，固件实现见 6（待补）。
+转向环负责控制小车转向。目标：给定期望角速度（gyro_z 或 yaw 误差 + P/D），通过左右轮差速量实现转向。控制理论见 5，固件实现见 6。
 
 ### 5. 控制理论
 
@@ -403,3 +403,65 @@ $$
 - 平衡车特有：\(\Delta\) 过大超出直立环调节能力会破坏平衡（尤其原地转）。
 
 **为何不采用"两个独立速度环"**：两轮各自闭环会通过共享的车体倾角隐式耦合——左环加速、右环减速会压斜车体、迫使直立环响应，三环互相打架。故业界采用"共模速度环 + 差模转向环"解耦结构：pitch 共享只能共模，yaw 差模独立成环，各环带宽逐级降低。
+
+### 6. 固件工程实现
+
+转向环固件为 `src/tests/test12_turn`，在 `test11_speed` 串级（速度环 PI + 直立环 PD）基础上新增差模转向环，三环并行，输出以对称差速量叠加进左右轮。核心控制算法严格按 5.2/5.3 的公式逐符号复现，见 6.1。
+
+#### 6.1 核心算法
+
+转向环为 `PIDController` 独立实例 `turn_pid`，其输出 \(\Delta\) 以差模形式叠加到共模输出（直立环 + 速度环）上。完整调用（源码见 `src/tests/test12_turn/main.cpp`）：
+
+```cpp
+// setup: 默认抑制模式, kp 装 TURN_KD, target 固定 0 (模式 A 复用 update_pwm)
+turn_pid.update_pid(TURN_KD, 0.0f, 0.0f);
+turn_pid.update_target(0.0f);
+turn_pid.output_limit(TURN_PWM_LIMIT);
+
+// 每 5ms 控制周期: 共模串级同 test11, 另取 Z 轴角速度作转向反馈
+const float omega_z = mpu.getGyroZ();
+
+// 差模: 按模式输出 Δ (docs 5.3)
+int16_t pwm_delta;
+if (turn_mode == TurnMode::kOpenloopTurn) {
+    pwm_delta = turn_pid.update_pwm_turn_openloop(turn_target_angle_deg); // 模式 B: Δ = TURN_KP*θ_target
+} else {
+    pwm_delta = turn_pid.update_pwm(omega_z);                             // 模式 A: Δ = -TURN_KD*ωz (target=0)
+}
+
+// 合成: 共模 base + 差模 Δ 对称叠加 (docs 5.2)
+const int16_t pwm_left = pwm_balance + pwm_delta;
+const int16_t pwm_right = pwm_balance - pwm_delta;
+motor.updateMotorSpeed(MOTOR_LEFT, pwm_left);
+motor.updateMotorSpeed(MOTOR_RIGHT, pwm_right);
+```
+
+- 转向环输出限幅 `TURN_PWM_LIMIT` 独立于直立环限幅，防止差速量 \(\Delta\) 过大超出直立环调节能力而破坏平衡（docs 5.5 平衡车特有问题）；
+- 模式切换（串口 `'t'`）时 `configure_turn_pid()` 先 `reset()` 再重配增益：模式 A 的误差差分/积分残留不会污染模式 B，反之亦然；
+- 方向符号约定（与 5.2 公式严格一致）：\(pwm_L = base + \Delta\) 且 \(\Delta > 0\) 时左轮快、车体右转，故串口 `'l'` 左转指令对 `turn_target_angle_deg` 取负、`'r'` 右转取正；模式 A 自洽无需取负——车左转时 \(\omega_z > 0\)，\(\Delta = -K_d\omega_z < 0\) 使右轮快，产生反向阻尼；
+- 抑制转向（模式 A）复用 `update_pwm`（`target=0` 的角速度比例跟踪），开环转动（模式 B）用新增的 `update_pwm_turn_openloop`（纯比例，见 `lib/PIDController/docs/README.md`），两者均为 `turn_pid` 单实例按模式配置。
+
+#### 6.2 串口命令
+
+| 命令 | 功能             | 说明                                                                       |
+| ---- | ---------------- | -------------------------------------------------------------------------- |
+| `s`  | 启停武装切换     | 同 test11                                                                  |
+| `c`  | 机械中值在线标定 | 同 test11                                                                  |
+| `w`  | 目标速度 +步进   | 每按一次 `target_speed_mm_s += SPEED_STEP_MM_S`                            |
+| `x`  | 目标速度 -步进   | 每按一次 `target_speed_mm_s -= SPEED_STEP_MM_S`                            |
+| `v`  | 回显目标速度     | 打印当前 `target_speed_mm_s`                                               |
+| `t`  | 切换转向模式     | 抑制(走直线) 与 开环转动 互切；切换时重配增益并清零目标转角                |
+| `l`  | 左转步进         | 仅开环模式有效，`turn_target_angle_deg -= TURN_ANGLE_STEP_DEG`（左转为负） |
+| `r`  | 右转步进         | 仅开环模式有效，`turn_target_angle_deg += TURN_ANGLE_STEP_DEG`             |
+| `o`  | 开环转角归零     | `turn_target_angle_deg = 0`，恢复直行                                      |
+
+#### 6.3 状态机与安全
+
+与 test11 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；转向环仅在 `kRunning` 内生效（`kIdle` 下输出关闭），倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。转向相关状态新增两项：`turn_mode`（当前模式）与 `turn_target_angle_deg`（开环目标转角，`'t'` 切换或 `'o'` 归零时清零，避免遗留转角指令）。
+
+#### 6.4 调参指南
+
+1. 先验证模式 A（默认抑制，`TURN_KD` 从 0 起调）：目标速度 0 直行，观察串口 `omega_z`——自发偏航越明显则 `TURN_KD` 需越大；调到车体能稳定走直线且不振荡为止；
+2. 校验差速符号：`'t'` 切入开环模式，发 `'r'`，若车体实际左转则 `'l'`/`'r'` 符号写反，调换 `main.cpp` 中 `'l'`/`'r'` 分支的加减号即可（勿改电机接线）；
+3. 再调模式 B：`'l'`/`'r'` 步进转角，观察转向响应快慢——`TURN_KP` 过小转向迟缓、过大则车体抖动或失衡；`TURN_PWM_LIMIT` 是安全上限，先保守再放开；
+4. 注意开环转角的固有代价（docs 5.5）：`TURN_ANGLE_STEP_DEG` 是"模糊转角"而非精确角度，多步累计会偏，实际转角以 `omega_z` 观测为准。
