@@ -79,7 +79,7 @@ void setup() {
         // 探测失败 (I2C 地址无应答): 打印错误码后死循环, 便于排查接线
         Serial.printf("[IMU] MPU6050 initialise failed, status=%u, shutdown\n", status);
         while (true) {
-            delay(1000);
+            delay(IMU_FAIL_LOOP_MS);
         }
     }
 
@@ -100,7 +100,7 @@ void setup() {
     motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
 
     // 配置速度环 PI 控制器 (外环, 无 D 项): 输出为期望角度增量 (deg), 限幅防目标角过大失衡
-    speed_pid.update_pid(SPEED_KP, SPEED_KI, 0.0f);
+    speed_pid.update_pid(SPEED_KP, SPEED_KI, SPEED_KD);
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
     // 配置直立环 PD 控制器: 库层强制纯 PD 无 I 项 (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比范围
@@ -122,7 +122,7 @@ void setup() {
 }
 
 void loop() {
-    delay(1000); // 控制与命令处理全部在 balance_task 中, 主循环空转
+    delay(IDLE_LOOP_MS); // 控制与命令处理全部在 balance_task 中, 主循环空转
 }
 
 namespace {

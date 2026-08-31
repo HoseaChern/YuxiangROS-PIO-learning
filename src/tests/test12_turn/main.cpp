@@ -90,7 +90,7 @@ void setup() {
         // 探测失败 (I2C 地址无应答): 打印错误码后死循环, 便于排查接线
         Serial.printf("[IMU] MPU6050 initialise failed, status=%u, shutdown\n", status);
         while (true) {
-            delay(1000);
+            delay(IMU_FAIL_LOOP_MS);
         }
     }
 
@@ -112,7 +112,7 @@ void setup() {
     motor.attachMotor(MOTOR_RIGHT, MOTOR_RIGHT_PIN_A, MOTOR_RIGHT_PIN_B);
 
     // 配置速度环 PI 控制器 (外环, 无 D 项): 输出为期望角度增量 (deg), 限幅防目标角过大失衡
-    speed_pid.update_pid(SPEED_KP, SPEED_KI, 0.0f);
+    speed_pid.update_pid(SPEED_KP, SPEED_KI, SPEED_KD);
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
     // 配置直立环 PD 控制器: 库层强制纯 PD (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比
@@ -135,7 +135,7 @@ void setup() {
 }
 
 void loop() {
-    delay(1000); // 控制与命令处理全部在 balance_task 中, 主循环空转
+    delay(IDLE_LOOP_MS); // 控制与命令处理全部在 balance_task 中, 主循环空转
 }
 
 namespace {
@@ -151,9 +151,9 @@ namespace {
 void configure_turn_pid() {
     turn_pid.reset(); // 切换模式时清零内部状态, 避免模式 A 残留的误差差分/积分污染模式 B
     if (turn_mode == TurnMode::kOpenloopTurn) {
-        turn_pid.update_pid(TURN_KP, 0.0f, 0.0f);
+        turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD_DISABLED);
     } else {
-        turn_pid.update_pid(TURN_KD, 0.0f, 0.0f);
+        turn_pid.update_pid(TURN_KD, TURN_KI, TURN_KD_DISABLED);
         turn_pid.update_target(0.0f); // 抑制转向: 期望角速度恒为 0
     }
     turn_pid.output_limit(TURN_PWM_LIMIT);
@@ -410,7 +410,7 @@ void control_step() {
     // 9. 文本打印: 以 10Hz 低频输出一行状态 (纯文本, 无绘图依赖), 供串口监视器观察
     static uint32_t last_print_ms = 0; // 上次打印时刻 (函数内静态, 跨周期保留)
     const uint32_t now_ms = millis();
-    if (now_ms - last_print_ms >= 100) {
+    if (now_ms - last_print_ms >= BALANCE_PRINT_MS) {
         last_print_ms = now_ms;
         Serial.printf(
             "state=%s theta=%.2f omega=%.2f omega_z=%.2f speed=%.1f target=%.1f "

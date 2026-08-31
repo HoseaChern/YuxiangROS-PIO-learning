@@ -71,7 +71,7 @@ void setup() {
         // 探测失败 (I2C 地址无应答): 打印错误码后死循环, 便于排查接线
         Serial.printf("[IMU] MPU6050 initialise failed, status=%u, shutdown\n", status);
         while (true) {
-            delay(1000);
+            delay(IMU_FAIL_LOOP_MS);
         }
     }
 
@@ -104,7 +104,7 @@ void setup() {
 }
 
 void loop() {
-    delay(1000); // 控制与命令处理全部在 balance_task 中, 主循环空转
+    delay(IDLE_LOOP_MS); // 控制与命令处理全部在 balance_task 中, 主循环空转
 }
 
 namespace {
