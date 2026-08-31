@@ -30,7 +30,7 @@
   - [Lidar Radar Passthrough (a different path from the book)](#lidar-radar-passthrough-a-different-path-from-the-book)
   - [Optimizations](#optimizations)
   - [Development Environment](#development-environment)
-    - [Generating compile\_commands.json (17 Envs Merged)](#generating-compile_commandsjson-17-envs-merged)
+    - [Generating compile\_commands.json (18 Envs Merged)](#generating-compile_commandsjson-18-envs-merged)
   - [Acknowledgements and References](#acknowledgements-and-references)
   - [License](#license)
 
@@ -113,7 +113,7 @@ buildable projects, one-to-one:
 
 ## platformio.ini Design
 
-`platformio.ini` is the core configuration: 17 environments (1 main + 4 examples + 12 tests), each example/test only compiles its own `main.cpp`, independent of the main firmware. Key points:
+`platformio.ini` is the core configuration: 18 environments (1 main + 4 examples + 13 tests), each example/test only compiles its own `main.cpp`, independent of the main firmware. Key points:
 
 - **`build_src_filter` isolation**: the main firmware uses `+<*> -<examples>
   -<tests>`; each example/test keeps only its own directory. Otherwise the
@@ -127,7 +127,8 @@ buildable projects, one-to-one:
 - **micro-ROS isolated via `lib_ignore`**: the common section sets
   `lib_ignore = micro_ros_platformio`, so its `extra_script.py` build hook
   (injects macros, links the prebuilt `libmicroros`) runs only where micro-ROS is
-  actually used; main and test06/07/08 override it with an empty `lib_ignore =`.
+  actually used; main and test06/07/08/test13 override it with an empty
+  `lib_ignore =`.
 - **IntelliSense fallback include**: the common section adds
   `-I${PROJECT_DIR}/lib/MPU6050_light/src` pointing at the localized IMU library
   header, so the IDE can resolve it under any active environment (harmless for
@@ -171,10 +172,10 @@ YuxiangROS-PIO-learning/
 ├── src/
 │   ├── main.cpp                 # main firmware: micro-ROS motion control + lidar passthrough (single-board merge)
 │   ├── examples/                # 4 example firmwares (example01~04)
-│   └── tests/                   # 12 test firmwares (test01~09 & balance test10_upright / test11_speed / test12_turn)
+│   └── tests/                   # 13 test firmwares (test01~09 & balance test10_upright / test11_speed / test12_turn / test13_balance)
 ├── docs/                        # study notes & debugging records (incl. lidar integration)
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ toolchain conventions
-└── platformio.ini               # 17-environment configuration
+└── platformio.ini               # 18-environment configuration
 ```
 
 ## Dependencies
@@ -183,12 +184,12 @@ All 4 third-party libraries are localized under `lib/` (shared by every
 environment, each keeps its `.git` for upstream tracking, git-ignored as a
 whole); the Source column is for upstream tracking only:
 
-| Library              | Purpose                 | Source                                                              | Used by                                              |
-| -------------------- | ----------------------- | ------------------------------------------------------------------- | ---------------------------------------------------- |
-| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08/10/11/12              |
-| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08/11/12                 |
-| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08                                   |
-| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04, test10_upright, test11_speed, test12_turn |
+| Library              | Purpose                 | Source                                                              | Used by                                                              |
+| -------------------- | ----------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08/10/11/12/13                           |
+| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08/11/12/13                              |
+| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08/13                                                |
+| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04, test10_upright, test11_speed, test12_turn, test13_balance |
 
 > Why the fishros prebuilt mirror: the official
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -230,6 +231,7 @@ pio run -e test01_motor -t upload
 | Test    | test10_upright       | two-wheel self-balancing upright loop PD (MPU6050, phase 1; see docs/Balance_Car_Notes.md)                           |
 | Test    | test11_speed         | two-wheel self-balancing cascade: speed loop PI + upright loop PD (phase 2; see docs/Balance_Car_Notes.md)           |
 | Test    | test12_turn          | two-wheel self-balancing turning: turn loop differential-mode superposition (phase 3; see docs/Balance_Car_Notes.md) |
+| Test    | test13_balance       | two-wheel self-balancing wireless control: micro-ROS + WiFi keyboard remote (phase 4; see docs/Balance_Car_Notes.md) |
 
 ## Running and Integration
 
@@ -317,7 +319,7 @@ Rationale (differences from common alternatives):
 The repo commits `.clangd`, `.clang-format`, and `.clang-tidy` (`.vscode/` is
 not committed).
 
-### Generating compile_commands.json (17 Envs Merged)
+### Generating compile_commands.json (18 Envs Merged)
 
 `pio run -t compiledb` only emits the currently active environment, so generate
 per env and merge with dedup (machine-generated, contains absolute paths, not
@@ -330,7 +332,7 @@ for env in esp32-s3-devkitc-1 example01_helloworld example02_LED \
            example03_Ultrasound example04_IMU test01_motor test02_encoder \
            test03_speed_trans test04_PID test05_Kinematics test06_wifi \
            test07_Subscription test08_Publisher test09_bridge test10_upright \
-           test11_speed test12_turn; do
+           test11_speed test12_turn test13_balance; do
   $pio run -e "$env" -t compiledb && mv compile_commands.json ".pio/ccdbs/$env.json"
 done
 python3 tools/merge_ccdb.py

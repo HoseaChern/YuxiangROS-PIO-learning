@@ -2,7 +2,7 @@
 
 在鱼香 ROS 差速底盘（`fishbot_motion_control`）基础上加装 MPU6050，拆下从动轮，整车退化为一级倒立摆，通过电机闭环控制实现两轮自平衡。
 
-本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前已完成直立环（`test10_upright`）、速度环（`test11_speed`）与转向环（`test12_turn`）的控制理论与固件。
+本文档按控制环组织，遵循「先控制理论数学模型，再实际代码工程实现」的顺序书写。当前已完成直立环（`test10_upright`）、速度环（`test11_speed`）、转向环（`test12_turn`）的控制理论与固件，并在 `test13_balance` 中通过 micro-ROS + WiFi 实现无线键盘遥控（`/cmd_vel`）。
 
 ## 直立环
 
@@ -465,3 +465,83 @@ motor.updateMotorSpeed(MOTOR_RIGHT, pwm_right);
 2. 校验差速符号：`'t'` 切入开环模式，发 `'r'`，若车体实际左转则 `'l'`/`'r'` 符号写反，调换 `main.cpp` 中 `'l'`/`'r'` 分支的加减号即可（勿改电机接线）；
 3. 再调模式 B：`'l'`/`'r'` 步进转角，观察转向响应快慢——`TURN_KP` 过小转向迟缓、过大则车体抖动或失衡；`TURN_PWM_LIMIT` 是安全上限，先保守再放开；
 4. 注意开环转角的固有代价（docs 5.5）：`TURN_ANGLE_STEP_DEG` 是"模糊转角"而非精确角度，多步累计会偏，实际转角以 `omega_z` 观测为准。
+
+## 无线操控（micro-ROS + WiFi）
+
+test12 的串口遥控（`w`/`x` 定速、`l`/`r` 开环转角）受线缆长度与实时性限制。`test13_balance` 在 test12 控制核心基础上引入 micro-ROS 与 WiFi，将指令通道迁移到 ROS2 话题 `/cmd_vel` 与 `/balance_enable`，由上位机 `teleop_twist_keyboard` 键盘遥控，实现真正无绳操控。
+
+### 7. 设计
+
+#### 7.1 话题约定与指令限幅
+
+| 话题 | 类型 | 字段 | 映射 |
+| ---- | ---- | ---- | ---- |
+| `/cmd_vel` | `geometry_msgs/Twist` | `linear.x` | 速度环目标 \(v_{set}\)（m/s → mm/s） |
+| `/cmd_vel` | `geometry_msgs/Twist` | `angular.z` | 偏航角速度目标 \(\omega_{z,set}\)（rad/s → deg/s） |
+| `/balance_enable` | `std_msgs/Bool` | `data` | `true` 请求武装 / `false` 请求解除 |
+
+`teleop_twist_keyboard` 默认 `linear.x = 0.5 m/s`、`angular.z = 1.0 rad/s`，超出平衡车调节能力，固件侧限幅兜底：
+
+\[
+|v_{set}| \le \mathrm{CMD\_MAX\_LINEAR\_MM\_S} = 300\ \text{mm/s}, \quad |\omega_{z,set}| \le \mathrm{CMD\_MAX\_ANGULAR\_DEG\_S} = 150\ \text{deg/s}
+\]
+
+上位机亦可用 `--ros-args -p linear.x:=0.2` 主动降速。
+
+#### 7.2 转向控制：偏航角速度伺服
+
+test12 转向环的模式 A（走直线阻尼）与模式 B（开环步进转角）面向串口人工交互；无线遥控场景下指令本身就是目标角速度，故 test13 将转向环统一为偏航角速度伺服：每个控制周期把 `target` 更新为 \(\omega_{z,set}\)，输出差模
+
+\[
+\Delta = K_d \cdot (\omega_{z,set} - \omega_z)
+\]
+
+当 \(\omega_{z,set} = 0\)（teleop 松键发布全零）时自动退化为 test12 模式 A：\(\Delta = -K_d \omega_z\)，产生走直线阻尼。差模合成与限幅同 6.1（\(pwm_L = base + \Delta\)，\(pwm_R = base - \Delta\)）。
+
+#### 7.3 并发模型与安全
+
+- 通信与控制分核运行：`micro_ros_task`（默认核，优先级 1，executor 回调）经临界区写指令变量；`balance_task`（core1，优先级 5，5 ms/200 Hz 节拍）在临界区内读指令快照后执行三环控制。共享变量 `cmd_linear_mps` / `cmd_angular_rps` / `cmd_enable` 为跨核非原子 float，一律由 `portMUX_TYPE` 临界区保护，避免跨核数据竞争；
+- 会话安全：micro-ROS Agent 断开（spin 返回错误）自动请求解除武装，防止失控时小车携带指令奔跑；
+- 倒地保护沿用 test12：\(|\theta - \theta_0| > 45^\circ\) 自动停机；
+- 串口保留 `s`/`c` 作为调试后备（字符集与 test10/11/12 一致），无 WiFi/Agent 时仍可独立操控：`s` 武装/解除（等价翻转 `/balance_enable`），`c` 标定机械中值（仅 `kIdle` 生效，非阻塞逐周期采样）。
+
+### 8. 固件工程实现
+
+#### 8.1 工程配置与依赖
+
+| 项 | 值 |
+| ---- | ---- |
+| 环境 | `[env:test13_balance]` |
+| 源码过滤 | `build_src_filter = +<tests/test13_balance>` |
+| micro-ROS 传输 | `board_microros_transport = wifi` |
+| 依赖库 | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`micro_ros_platformio`、`WiFi` |
+
+`platformio.ini` 公共段默认 `lib_ignore = micro_ros_platformio`（避免其他环境触发 micro-ROS 钩子），`test13_balance` 用空 `lib_ignore =` 覆盖解除，与主环境、`test06/07/08` 保持一致。
+
+#### 8.2 初始化与数据流
+
+- WiFi 与 Agent：`set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT)`，Agent 地址由 `IPAddress.fromString(ROS_AGENT_IP)` 解析；
+- micro-ROS：`rclc_support_init` → `rclc_node_init_default` → `rclc_executor_init`（2 个订阅句柄）→ 两个 best-effort 订阅（`/cmd_vel`、`/balance_enable`）→ `rclc_executor_spin`；
+- 指令流：Twist 回调把 `linear.x`、`angular.z` 换算限幅后经临界区写入 `cmd_linear_mps` / `cmd_angular_rps`；Bool 回调把 `cmd_enable` 置位；`control_step` 每周期读快照后执行三环控制。
+
+#### 8.3 上位机操作步骤
+
+```bash
+# 终端 1: 启动 micro-ROS Agent (UDP)
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+
+# 终端 2: 武装
+ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5
+
+# 终端 3: 键盘遥控 (可加 --ros-args -p linear.x:=0.2 降速)
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+`i`/`j`/`k`/`l` 操控；teleop 松键自动发布全零，小车回归走直线阻尼；`ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: false}" -r 5` 或关闭 Agent 即解除武装。
+
+#### 8.4 调参与联调要点
+
+1. 先确认 WiFi 连接与 Agent 握手：串口打印 `client connected` 表示传输层就绪，再发 `s` 或 `/balance_enable` 武装；
+2. 无 Agent 时小车不可无线遥控，串口 `s`/`c` 后备仍可用；
+3. 转向符号：若实测左右反向，对 `angular.z` 取负（与 6.4 差速符号校验同理）；
+4. 限幅参数在 `config.h` 无线操控区调整；`CMD_MAX_LINEAR_MM_S` 保守调低可减少起步横摆冲击。

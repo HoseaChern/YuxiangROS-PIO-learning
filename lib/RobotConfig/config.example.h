@@ -167,11 +167,23 @@ constexpr float SPEED_STEP_MM_S = 10.0f;    // 串口调速步进, 单位 mm/s (
 // 模式 A 抑制转向(默认): Δ = -TURN_KD*ωz, 复用 update_pwm (target=0, kp 装 TURN_KD), 阻尼自发偏航走直线
 // 模式 B 开环转动:        Δ = TURN_KP*θ_target, 用 update_pwm_turn_openloop (docs 5.3 模式 B)
 
-constexpr float TURN_KD = 0.2f;           // 抑制转向阻尼增益, 单位 PWM/(deg/s) (经验起点, 待实测整定)
-constexpr float TURN_KP = 0.2f;           // 开环转动比例增益, 单位 PWM/deg (经验起点, 待实测整定)
-constexpr float TURN_KI = 0.0f;           // 转向环积分增益 (无 I 项, 占位勿改)
-constexpr float TURN_KD_DISABLED = 0.0f;  // 转向环微分增益 (无 D 项, 占位勿改; 阻尼由 TURN_KD 装于 kp 槽实现)
-constexpr float TURN_PWM_LIMIT = 60.0f;   // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
+constexpr float TURN_KD = 0.2f; // 抑制转向阻尼增益, 单位 PWM/(deg/s) (经验起点, 待实测整定)
+constexpr float TURN_KP = 0.2f; // 开环转动比例增益, 单位 PWM/deg (经验起点, 待实测整定)
+constexpr float TURN_KI = 0.0f; // 转向环积分增益 (无 I 项, 占位勿改)
+constexpr float TURN_KD_DISABLED =
+    0.0f; // 转向环微分增益 (无 D 项, 占位勿改; 阻尼由 TURN_KD 装于 kp 槽实现)
+constexpr float TURN_PWM_LIMIT = 60.0f;      // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
 constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 deg ('l'/'r' 每次步进)
+
+// ---- 无线操控参数 (test13_balance micro-ROS 键盘遥控固件) ----
+// /cmd_vel 指令限幅: teleop_twist_keyboard 默认 linear.x=0.5 m/s、angular.z=1.0 rad/s,
+// 平衡车本体调节能力有限, 固件侧限幅兜底; 上位机也可用 teleop 参数降速
+// (例如 --ros-args -p linear.x:=0.2, 详细操作见 docs/Balance_Car_Notes.md 无线操控章节)
+
+constexpr float CMD_MAX_LINEAR_MM_S = 300.0f;   // /cmd_vel linear.x 限幅, 单位 mm/s
+constexpr float CMD_MAX_ANGULAR_DEG_S = 150.0f; // /cmd_vel angular.z 限幅, 单位 deg/s
+constexpr float RAD_S_TO_DEG_S =
+    57.2958f; // rad/s -> deg/s (偏航角速度换算, 避开 Arduino 宏 RAD_TO_DEG)
+constexpr char BALANCE_ENABLE_TOPIC[] = "/balance_enable"; // 武装使能话题 (std_msgs/Bool)
 
 #endif // ROBOTCONFIG_H
