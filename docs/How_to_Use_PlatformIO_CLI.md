@@ -133,7 +133,7 @@ pio run -e esp32-s3-devkitc-1-wifi-test -t upload
 pio run -e esp32-s3-devkitc-1 -t upload
 ```
 
-> ⚠️ 注意：PlatformIO 6.x 已将 `src_filter` 更名为 **`build_src_filter`**，
+> 注意：PlatformIO 6.x 已将 `src_filter` 更名为 **`build_src_filter`**，
 > 语法不变（`+<目录>` 仅包含 / `-<目录>` 排除）。
 > 多 env 共享的选项（如 `lib_deps`、`board_microros_transport`）需在两个 env 里各自声明，
 > 或用 `[platformio]` + `default_envs` 等进阶写法。
@@ -221,7 +221,11 @@ PIO 的网络需求分三类，各有对应解法：
 - platform/toolchain 下载（`dl.platformio.org`）→ 5.2 环境变量
 - `pio upgrade` / pip 装包 → 5.2 + 5.3 的 pip 镜像
 
-### 5.1 git 定向代理（已配置 ✅，解决 `lib_deps` 的 GitHub 依赖）
+> **本项目现状**：4 个第三方库已本地化到 `lib/`（保留各自 `.git` 追溯上游，目录整体被
+> `.gitignore` 忽略），构建不再走 `lib_deps` 的 GitHub 下载；5.1 的 git 定向代理对
+> 其他项目或手动 clone 第三方库时仍适用。
+
+### 5.1 git 定向代理（已配置，解决 `lib_deps` 的 GitHub 依赖）
 
 git 只认环境变量或 `git config`，不读"系统代理"。只对 github.com 走代理，不依赖环境变量：
 
@@ -235,7 +239,7 @@ git config --global --get-regexp 'proxy'                      # 查看
 git config --global --unset-all http.https://github.com.proxy  # 移除
 ```
 
-### 5.2 `~/.zshrc` 代理管理函数（已配置 ✅，解决工具链下载 + pip）
+### 5.2 `~/.zshrc` 代理管理函数（已配置，解决工具链下载 + pip）
 
 PIO 从 `dl.platformio.org` 下载 platform/toolchain 走 HTTPS，需要环境变量。
 函数带**存活检测**（代理开着才 export，关了自动 unset，避免"变量指向死端口 → 连接被拒"），且静默执行避免 p10k instant
@@ -262,7 +266,7 @@ proxy_on   # 开终端自动执行
 - `NO_PROXY` 兜住本地/局域网（micro-ROS Agent 的 UDP 不受影响）
 - 手动命令：`proxy_on` / `proxy_off` / `proxy_status`
 
-### 5.3 pip 国内镜像（已配置 ✅，`pio upgrade` 本质是 pip）
+### 5.3 pip 国内镜像（已配置，`pio upgrade` 本质是 pip）
 
 `~/.config/pip/pip.conf` 已配置（清华源 + trusted-host，与代理解耦）：
 
@@ -272,7 +276,7 @@ index-url = https://pypi.tuna.tsinghua.edu.cn/simple
 trusted-host = pypi.tuna.tsinghua.edu.cn
 ```
 
-### 5.4 VSCode 内置终端（已解决 ✅，inheritEnv）
+### 5.4 VSCode 内置终端（已解决，inheritEnv）
 
 `settings.json` 的 `"terminal.integrated.inheritEnv": false`
 会使内置终端**不继承环境变量**，`git clone` 龟速。本机已改为 `true`（继承主进程环境，VSCode 自带终端即正常）：

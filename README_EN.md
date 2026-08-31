@@ -118,17 +118,20 @@ buildable projects, one-to-one:
 - **`build_src_filter` isolation**: the main firmware uses `+<*> -<examples>
   -<tests>`; each example/test keeps only its own directory. Otherwise the
   multiple `setup()/loop()` in `src/` cause duplicate-symbol link errors.
-- **Per-environment `lib_deps`**: no `lib_deps` in the common section (there is
-  no common dependency across environments); each environment installs only what
-  it needs, so `lib_ignore` is never required.
-- **micro-ROS declared only where used** (main, test06/07/08): its
-  `extra_script.py` build hook runs unconditionally in any environment where it
-  is installed (injects macros, links the prebuilt `libmicroros`), so it must not
-  be installed into unrelated environments.
-- **IntelliSense fallback include**: `MPU6050_light` is only installed in the
-  example04 / test10_upright / test11_speed / test12_turn environments; a common-section `-I`
-  points at its header so the IDE can resolve it under any active environment
-  (harmless for compilation).
+- **Third-party libraries localized under `lib/`**: the 4 third-party libraries
+  (Esp32McpwmMotor / Esp32PcntEncoder / MPU6050_light / micro_ros_platformio) were
+  copied from `.pio/libdeps` into `lib/` and are shared by every environment (no
+  per-environment `lib_deps` anymore; each environment compiles only the
+  libraries its sources actually `#include`). Each library keeps its `.git` for
+  upstream tracking, and the directories are git-ignored entirely.
+- **micro-ROS isolated via `lib_ignore`**: the common section sets
+  `lib_ignore = micro_ros_platformio`, so its `extra_script.py` build hook
+  (injects macros, links the prebuilt `libmicroros`) runs only where micro-ROS is
+  actually used; main and test06/07/08 override it with an empty `lib_ignore =`.
+- **IntelliSense fallback include**: the common section adds
+  `-I${PROJECT_DIR}/lib/MPU6050_light/src` pointing at the localized IMU library
+  header, so the IDE can resolve it under any active environment (harmless for
+  compilation).
 - **Config & credential separation**: shared compile-time constants (pins,
   calibration, WiFi credentials, Agent IP/port, etc.) live in
   `lib/RobotConfig/config.h` (local copy, not in the repo); the template is
@@ -139,11 +142,13 @@ buildable projects, one-to-one:
 platform = espressif32
 board = esp32-s3-devkitc-1
 framework = arduino
+; ignore micro-ROS by default (localized under lib/); envs that use it override
+lib_ignore = micro_ros_platformio
 
 [env:esp32-s3-devkitc-1]                 ; main firmware
 build_src_filter = +<*> -<examples> -<tests>
 board_microros_transport = wifi
-lib_deps = Esp32McpwmMotor, Esp32PcntEncoder, micro_ros_platformio (fishros mirror)
+lib_ignore =                            ; override the common section
 
 [env:example01_helloworld]               ; example: compiles its own dir only
 build_src_filter = +<examples/example01_helloworld>
@@ -154,11 +159,15 @@ build_src_filter = +<examples/example01_helloworld>
 ```text
 YuxiangROS-PIO-learning/
 ├── include/                     # project headers (reserved)
-├── lib/                         # private libraries
+├── lib/                         # libraries (private + localized third-party)
 │   ├── Kinematics/              # two-wheel differential kinematics (fwd/inv + odom), pure algorithm
 │   ├── PIDController/           # positional PID, pure algorithm
 │   ├── RobotConfig/             # shared compile-time config (template config.example.h + docs)
-│   └── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
+│   ├── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
+│   ├── Esp32McpwmMotor/         # 3rd-party: MCPWM motor driver (git-ignored)
+│   ├── Esp32PcntEncoder/        # 3rd-party: PCNT encoder reading (git-ignored)
+│   ├── MPU6050_light/           # 3rd-party: IMU attitude estimation (git-ignored)
+│   └── micro_ros_platformio/    # 3rd-party: micro-ROS (git-ignored)
 ├── src/
 │   ├── main.cpp                 # main firmware: micro-ROS motion control + lidar passthrough (single-board merge)
 │   ├── examples/                # 4 example firmwares (example01~04)
@@ -169,6 +178,10 @@ YuxiangROS-PIO-learning/
 ```
 
 ## Dependencies
+
+All 4 third-party libraries are localized under `lib/` (shared by every
+environment, each keeps its `.git` for upstream tracking, git-ignored as a
+whole); the Source column is for upstream tracking only:
 
 | Library              | Purpose                 | Source                                                              | Used by                                              |
 | -------------------- | ----------------------- | ------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -296,7 +309,7 @@ Rationale (differences from common alternatives):
   architecture, and the Arduino framework and micro-ROS prebuilt libraries rely
   on PIO's bundled cross-compiler;
 - **clangd over cpptools**: cpptools IntelliSense cannot handle "cross-compiler
-  built-in macros + multi-environment libdeps"; clangd consumes
+  built-in macros + multi-environment build config"; clangd consumes
   `compile_commands.json` carrying the full compile command;
 - **gdb over CodeLLDB**: CodeLLDB's LLDB has no Xtensa support, so embedded
   debugging goes through OpenOCD + gdb.

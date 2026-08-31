@@ -104,14 +104,17 @@
 - **`build_src_filter` 环境隔离**：主固件 `+<*> -<examples> -<tests>`；每个
   示例/测试只保留自己的目录。否则 `src/` 下多个 `setup()/loop()` 符号重复定义，
   链接失败。
-- **`lib_deps` 按环境声明**：公共段不写 `lib_deps`（各环境依赖无公共交集），
-  每环境只装自己需要的库，`lib_ignore` 完全不需要。
-- **micro-ROS 只声明在使用它的环境**（主环境、test06/07/08）：其 `extra_script.py`
-  构建钩子在被安装的环境无条件执行（注入宏、链接预编译 `libmicroros`），无法用
-  `lib_ignore` 阻止，故不能装进无关环境。
-- **IntelliSense 兜底 include**：`MPU6050_light` 只装在 example04 / test10_upright
-  / test11_speed / test12_turn 环境，公共段加 `-I` 指向其头文件，保证任何激活环境下 IDE 都能
-  解析该头（编译层面多余但无害）。
+- **第三方库本地化到 `lib/`**：4 个第三方库（Esp32McpwmMotor / Esp32PcntEncoder /
+  MPU6050_light / micro_ros_platformio）已从 `.pio/libdeps` 拷入 `lib/`，各环境共享
+  同一份源码（不再需要环境级 `lib_deps`，按源码实际 `#include` 自动编译）；各库保留
+  `.git` 以追溯上游，目录整体被 `.gitignore` 忽略、不入库。
+- **`lib_ignore` 隔离 micro-ROS**：公共段 `lib_ignore = micro_ros_platformio` 默认
+  对所有环境忽略 micro-ROS，其 `extra_script.py` 构建钩子（注入宏、链接预编译
+  `libmicroros`）只在真正使用它的环境执行；主环境、test06/07/08 用空 `lib_ignore =`
+  覆盖解除。
+- **IntelliSense 兜底 include**：公共段
+  `-I${PROJECT_DIR}/lib/MPU6050_light/src` 指向本地化后的 IMU 库头文件，保证任何
+  激活环境下 IDE 都能解析该头（编译层面多余但无害）。
 - **配置与凭据分离**：引脚、标定参数、WiFi 凭据、Agent IP/端口等共用编译期常量
   集中于 `lib/RobotConfig/config.h`（本地副本，不入库），模板见 `config.example.h`；
   调整硬件接线/部署环境不会污染 git 工作区。
@@ -121,11 +124,13 @@
 platform = espressif32
 board = esp32-s3-devkitc-1
 framework = arduino
+; 默认忽略 micro-ROS 库（已本地化于 lib/），使用它的环境单独覆盖解除
+lib_ignore = micro_ros_platformio
 
 [env:esp32-s3-devkitc-1]                 ; 主固件
 build_src_filter = +<*> -<examples> -<tests>
 board_microros_transport = wifi
-lib_deps = Esp32McpwmMotor, Esp32PcntEncoder, micro_ros_platformio(fishros 镜像)
+lib_ignore =                            ; 覆盖公共段，解除对 micro-ROS 的忽略
 
 [env:example01_helloworld]               ; 示例：只编译自身目录
 build_src_filter = +<examples/example01_helloworld>
@@ -136,21 +141,28 @@ build_src_filter = +<examples/example01_helloworld>
 ```text
 YuxiangROS-PIO-learning/
 ├── include/                     # 项目头文件（预留）
-├── lib/                         # 私有库
+├── lib/                         # 库（私有库 + 本地化第三方库）
 │   ├── Kinematics/              # 两轮差速运动学（正/逆解 + 里程计），纯算法
 │   ├── PIDController/           # 位置式 PID，纯算法
 │   ├── RobotConfig/             # 共用编译期配置（模板 config.example.h + docs）
-│   └── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
+│   ├── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
+│   ├── Esp32McpwmMotor/         # 第三方：MCPWM 电机驱动（gitignore，不入库）
+│   ├── Esp32PcntEncoder/        # 第三方：PCNT 编码器读取（gitignore，不入库）
+│   ├── MPU6050_light/           # 第三方：IMU 姿态解算（gitignore，不入库）
+│   └── micro_ros_platformio/    # 第三方：micro-ROS（gitignore，不入库）
 ├── src/
 │   ├── main.cpp                 # 主固件：micro-ROS 运动控制 + 激光雷达透传（单板融合）
 │   ├── examples/                # 4 个示例固件（example01~04）
 │   └── tests/                   # 12 个测试固件（test01~09 与直立/串级 test10_upright、test11_speed、test12_turn）
 ├── docs/                        # 学习笔记与调试记录（含激光雷达接入全流程）
 ├── .clangd / .clang-format / .clang-tidy   # C/C++ 工具链规范
-└── platformio.ini               # 16 环境工程配置
+└── platformio.ini               # 17 环境工程配置
 ```
 
 ## 依赖库
+
+4 个第三方库均已本地化到 `lib/`（各环境共享源码、保留 `.git` 追溯上游，目录整体被
+`.gitignore` 忽略、不入库），来源列仅供追溯上游：
 
 | 库                   | 用途            | 来源                                                                 | 使用环境                                             |
 | -------------------- | --------------- | -------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -264,7 +276,7 @@ pio run -e test01_motor -t upload
 - **编译层不可替换**：ESP32-S3 是 Xtensa LX7 架构，Arduino framework 与
   micro-ROS 预编译库都以 PIO 自带交叉编译器为编译底线；
 - **开发表层选 clangd 而非 cpptools**：cpptools 无法处理"交叉编译器内置宏 +
-  多环境 libdeps"的解析；clangd 依赖 `compile_commands.json` 承载完整编译命令；
+  多环境构建配置"的解析；clangd 依赖 `compile_commands.json` 承载完整编译命令；
 - **调试层选 gdb 而非 CodeLLDB**：CodeLLDB 的 LLDB 不支持 Xtensa 架构，
   嵌入式调试只能走 OpenOCD + gdb。
 
