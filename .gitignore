@@ -4,4 +4,10 @@
 
 lib/RobotConfig/config.h
 
+# 第三方库集中存放
+lib/Esp32McpwmMotor/
+lib/Esp32PcntEncoder/
+lib/MPU6050_light/
+lib/micro_ros_platformio/
+
 compile_commands.json
