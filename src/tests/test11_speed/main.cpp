@@ -30,6 +30,7 @@
 
 #include <cmath>
 
+#include <Kinematics.h>
 #include <PIDController.h>
 #include <SemanticEnums.h>
 
@@ -51,6 +52,7 @@ Esp32PcntEncoder encoders[2];                     // 编码器对象数组 (两�
 MPU6050 mpu(Wire);                                // MPU6050 对象, 使用 Wire 作为 I2C 总线
 PIDController speed_pid;                          // 速度环 PI 控制器 (外环, 参数在 setup 中配置)
 PIDController balance_pid;                        // 直立环 PD 控制器 (内环, 参数在 setup 中配置)
+Kinematics kinematics;                            // 运动学对象: 编码器测速 + 正解
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
 float zero_pitch_deg = BALANCE_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
@@ -59,7 +61,6 @@ float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, �
 // ---- 函数前向声明 (内部链接) ----
 
 void handle_serial_command(float theta);
-float measure_speed_mm_s();
 void control_step();
 void balance_task(void* param);
 
@@ -94,6 +95,10 @@ void setup() {
     // 初始化两路编码器
     encoders[MOTOR_LEFT].init(MOTOR_LEFT, ENC_LEFT_PIN_A, ENC_LEFT_PIN_B);
     encoders[MOTOR_RIGHT].init(MOTOR_RIGHT, ENC_RIGHT_PIN_A, ENC_RIGHT_PIN_B);
+
+    // 配置运动学参数: 单脉冲距离与轮间距
+    kinematics.set_motor_param(DISTANCE_PER_TICK_MM);
+    kinematics.set_wheel_distance(WHEEL_DISTANCE_MM);
 
     // 初始化两路电机
     motor.attachMotor(MOTOR_LEFT, MOTOR_LEFT_PIN_A, MOTOR_LEFT_PIN_B);
@@ -201,51 +206,6 @@ void handle_serial_command(float theta) {
 }
 
 /**
- * @brief 编码器测速: 返回车体前进速度 (mm/s, 两轮平均)
- *
- * 差值法 (同 test03): 本周期与上一周期编码器 tick 差值 * 单脉冲距离 / 时间差。
- * 每控制周期 (5ms) 由 control_step 调用一次, 内部用函数静态量维护采样基线。
- * 单位换算: delta_ticks * DISTANCE_PER_TICK_MM / dt_ms 得 mm/ms, 再乘 MS_TO_S 得 mm/s。
- *
- * @return 车体前进速度 v (mm/s); 前进为正 (依赖编码器读数方向, 见文件头方向约定)
- */
-float measure_speed_mm_s() {
-    static uint32_t last_time_ms = 0;      // 上一次采样时刻
-    static int32_t last_ticks[2] = {0, 0}; // 上一次编码器读数
-    static bool is_first_run = true;       // 首次调用标志: 仅建基线, 不产生速度
-
-    const uint32_t now_ms = millis();
-    if (is_first_run) {
-        // 初始化采样基线, 避免首次控制周期时间差过大
-        last_time_ms = now_ms;
-        last_ticks[MOTOR_LEFT] = encoders[MOTOR_LEFT].getTicks();
-        last_ticks[MOTOR_RIGHT] = encoders[MOTOR_RIGHT].getTicks();
-        is_first_run = false;
-        return 0.0f;
-    }
-
-    const uint32_t dt_ms = now_ms - last_time_ms; // 距上次采样的时间差
-    if (dt_ms == 0) {
-        return 0.0f; // 时间差为 0 时不计算, 避免除零
-    }
-
-    // 各轮 delta_ticks * 单脉冲距离 / 时间差 = mm/ms, 乘 MS_TO_S 得 mm/s
-    const float v_left =
-        static_cast<float>(encoders[MOTOR_LEFT].getTicks() - last_ticks[MOTOR_LEFT]) *
-        DISTANCE_PER_TICK_MM / static_cast<float>(dt_ms) * MS_TO_S;
-    const float v_right =
-        static_cast<float>(encoders[MOTOR_RIGHT].getTicks() - last_ticks[MOTOR_RIGHT]) *
-        DISTANCE_PER_TICK_MM / static_cast<float>(dt_ms) * MS_TO_S;
-
-    // 更新采样基线
-    last_time_ms = now_ms;
-    last_ticks[MOTOR_LEFT] = encoders[MOTOR_LEFT].getTicks();
-    last_ticks[MOTOR_RIGHT] = encoders[MOTOR_RIGHT].getTicks();
-
-    return (v_left + v_right) * 0.5f; // 车体前进速度 = 两轮平均 (直行时两轮同速)
-}
-
-/**
  * @brief 单周期控制步骤: 读 IMU + 测速 -> 命令处理(含在线标定采样) -> 状态机 -> 串级输出 -> 文本打印
  *
  * 由 balance_task 以 5ms 固定节拍调用。内部顺序即完整控制链路:
@@ -259,8 +219,16 @@ void control_step() {
     const float theta = -mpu.getAngleY(); // theta: 控制俯仰角 (deg), 前倾为正
     const float omega = -mpu.getGyroY();  // omega: 控制角速度 (deg/s), 前倾方向为正
 
-    // 2. 编码器测速: 车体前进速度 (mm/s), 用作速度环反馈
-    const float speed_mm_s = measure_speed_mm_s();
+    // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈
+    int32_t ticks[2] = {encoders[MOTOR_LEFT].getTicks(), encoders[MOTOR_RIGHT].getTicks()};
+    kinematics.update_motor_speed(millis(), ticks);
+    float motor_speeds[2] = {
+        kinematics.get_motor_speed(MOTOR_LEFT),
+        kinematics.get_motor_speed(MOTOR_RIGHT)
+    };
+    float body_vel[2] = {0.0f, 0.0f};
+    kinematics.kinematics_forward(motor_speeds, body_vel);
+    const float speed_mm_s = body_vel[VEL_LINEAR];
 
     // 3. 处理串口命令
     handle_serial_command(theta);
