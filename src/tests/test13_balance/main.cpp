@@ -63,7 +63,7 @@ PIDController turn_pid;       // 转向环控制器 (差模角速度伺服, 参�
 Kinematics kinematics;        // 运动学对象: 编码器测速 + 正解
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 (cmd_enable 同步而来, 倒地自动解除)
-float zero_pitch_deg = BALANCE_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
+float zero_pitch_deg = UPRIGHT_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
 
 // ---- 跨任务共享变量 (micro-ROS 回调写 / balance_task 读, 临界区保护) ----
 // micro_ros_task 与 balance_task 分属不同核心, 跨核共享非原子 float 必须用临界区,
@@ -103,7 +103,7 @@ void setup() {
 
     // 陀螺仪零偏校准: 期间必须保持小车静止平放, 校准结果作为角度零点基准
     Serial.println("[IMU] calibrating gyro offset, keep the car still and level...");
-    delay(BALANCE_CALM_DELAY_MS); // 静置等待传感器稳定后再采样
+    delay(UPRIGHT_CALM_DELAY_MS); // 静置等待传感器稳定后再采样
     mpu.calcOffsets();
     Serial.println(
         "[IMU] calibration done. Commands: s=arm/stop c=calibrate-zero. "
@@ -127,8 +127,8 @@ void setup() {
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
     // 配置直立环 PD 控制器: 库层强制纯 PD (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比
-    balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
-    balance_pid.output_limit(BALANCE_PWM_LIMIT);
+    balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
+    balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
     // 配置转向环 (差模角速度伺服): kp 装 TURN_KD, target 每周期由 ωz_set 驱动 (docs 7.2)
     turn_pid.update_pid(TURN_KD, TURN_KI, TURN_KD_DISABLED);
@@ -213,7 +213,7 @@ void handle_serial_command(float theta) {
         calib_sum += theta;
         --calib_remaining;
         if (calib_remaining == 0) {
-            zero_pitch_deg = calib_sum / BALANCE_CALIB_CYCLES;
+            zero_pitch_deg = calib_sum / UPRIGHT_CALIB_CYCLES;
             Serial.printf("[CALIB] zero_pitch=%.2f deg\n", zero_pitch_deg);
         }
         return;
@@ -234,7 +234,7 @@ void handle_serial_command(float theta) {
     case 'c': {
         // 标定机械中值: 仅停止状态可标定, 启动后由 control_step 逐周期累加
         if (balance_state == BalanceState::kIdle) {
-            calib_remaining = BALANCE_CALIB_CYCLES;
+            calib_remaining = UPRIGHT_CALIB_CYCLES;
             calib_sum = 0.0f;
             Serial.println("[CALIB] sampling 0.2s, hold the car upright...");
         }
@@ -308,7 +308,7 @@ void control_step() {
         // 停止: 关闭输出, 等待武装且姿态进入中值窗口后起控
         motor.updateMotorSpeed(MOTOR_LEFT, 0);
         motor.updateMotorSpeed(MOTOR_RIGHT, 0);
-        if (balance_armed && fabsf(theta - zero_pitch_deg) <= BALANCE_ARM_ANGLE_DEG) {
+        if (balance_armed && fabsf(theta - zero_pitch_deg) <= UPRIGHT_ARM_ANGLE_DEG) {
             balance_state = BalanceState::kRunning;
             speed_pid.reset(); // 起控清零积分, 防止残留误差导致起步冲击
             balance_pid.reset();
@@ -318,7 +318,7 @@ void control_step() {
         break;
     case BalanceState::kRunning: {
         // 解除请求 (/balance_enable false / Agent 断开 / 串口 's') 或倒地: 立即退出直立控制
-        if (!balance_armed || fabsf(theta - zero_pitch_deg) >= BALANCE_FALL_ANGLE_DEG) {
+        if (!balance_armed || fabsf(theta - zero_pitch_deg) >= UPRIGHT_FALL_ANGLE_DEG) {
             balance_state = BalanceState::kIdle;
             balance_armed = false;
             portENTER_CRITICAL(&cmd_mux);

@@ -63,7 +63,7 @@ PIDController turn_pid;       // 转向环控制器 (差模, 参数随模式在 
 Kinematics kinematics;        // 运动学对象: 编码器测速 + 正解
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
-float zero_pitch_deg = BALANCE_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
+float zero_pitch_deg = UPRIGHT_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
 float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, 可由 'w'/'x' 命令调整
 TurnMode turn_mode = TurnMode::kStraight;         // 当前转向模式, 可由 't' 命令切换
 float turn_target_angle_deg = 0.0f;               // 开环期望转角 θ_target, 'l'/'r' 步进 ('o' 归零)
@@ -97,7 +97,7 @@ void setup() {
 
     // 陀螺仪零偏校准: 期间必须保持小车静止平放, 校准结果作为角度零点基准
     Serial.println("[IMU] calibrating gyro offset, keep the car still and level...");
-    delay(BALANCE_CALM_DELAY_MS); // 静置等待传感器稳定后再采样
+    delay(UPRIGHT_CALM_DELAY_MS); // 静置等待传感器稳定后再采样
     mpu.calcOffsets();
     Serial.println(
         "[IMU] calibration done. Commands: s=arm/stop c=calibrate-zero w=+speed x=-speed "
@@ -121,8 +121,8 @@ void setup() {
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
     // 配置直立环 PD 控制器: 库层强制纯 PD (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比
-    balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
-    balance_pid.output_limit(BALANCE_PWM_LIMIT);
+    balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
+    balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
     // 配置转向环 (差模): 默认抑制模式, Δ 经 update_pwm 以 target=0 复用 (docs 5.3 模式 A)
     configure_turn_pid();
@@ -192,7 +192,7 @@ void handle_serial_command(float theta) {
         calib_remaining--;  // 剩余采样周期递减
         if (calib_remaining == 0) {
             // 采样完成: 更新机械中值 theta_0
-            zero_pitch_deg = calib_sum / BALANCE_CALIB_CYCLES;
+            zero_pitch_deg = calib_sum / UPRIGHT_CALIB_CYCLES;
             Serial.printf("[CALIB] zero_pitch=%.2f deg\n", zero_pitch_deg);
         }
     }
@@ -213,7 +213,7 @@ void handle_serial_command(float theta) {
                 break;
             }
             // 启动中值标定: 置剩余采样周期数, 清零累加和, 由本函数逐周期累加
-            calib_remaining = BALANCE_CALIB_CYCLES;
+            calib_remaining = UPRIGHT_CALIB_CYCLES;
             calib_sum = 0.0f;
             Serial.println("[CALIB] sampling 0.2s, hold the car upright...");
             break;
@@ -324,7 +324,7 @@ void control_step() {
         motor.updateMotorSpeed(MOTOR_RIGHT, 0);
 
         // 起控条件: 已武装 且 |theta - theta_0| 进入起控窗口 -> 起控
-        if (balance_armed && fabsf(theta - zero_pitch_deg) <= BALANCE_ARM_ANGLE_DEG) {
+        if (balance_armed && fabsf(theta - zero_pitch_deg) <= UPRIGHT_ARM_ANGLE_DEG) {
             // 清零各环 PID 内部状态 (误差差分/积分), 避免上次残留
             balance_pid.reset();
             speed_pid.reset();
@@ -336,7 +336,7 @@ void control_step() {
 
     case BalanceState::kRunning:
         // 倒地保护: 姿态超出安全窗口 -> 解除武装并切回停止, 下一周期关闭输出
-        if (fabsf(theta - zero_pitch_deg) >= BALANCE_FALL_ANGLE_DEG) {
+        if (fabsf(theta - zero_pitch_deg) >= UPRIGHT_FALL_ANGLE_DEG) {
             balance_armed = false;
             balance_state = BalanceState::kIdle;
             Serial.println("[SAFE] fall detected, disarmed");
@@ -365,7 +365,7 @@ void control_step() {
 
         // 7. 合成: 共模 base + 差模 Δ 对称叠加 (docs 5.2)
         // 在 int 域求和避免 int16 整数提升的隐式窄化告警; 两环输出均独立限幅
-        // (BALANCE_PWM_LIMIT / TURN_PWM_LIMIT), 和值远小于 int16_t 范围, 显式转换安全
+        // (UPRIGHT_PWM_LIMIT / TURN_PWM_LIMIT), 和值远小于 int16_t 范围, 显式转换安全
         pwm_left = static_cast<int16_t>(static_cast<int>(pwm_balance) + pwm_delta);
         pwm_right = static_cast<int16_t>(static_cast<int>(pwm_balance) - pwm_delta);
 

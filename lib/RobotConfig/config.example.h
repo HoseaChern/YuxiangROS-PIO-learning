@@ -122,47 +122,47 @@ constexpr uint32_t LIDAR_MOTOR_SPEED =
 constexpr uint16_t BRIDGE_TCP_PORT = 8889;     // 上位机 ros_serial2wifi tcp_server 端口
 constexpr uint32_t BRIDGE_RECONNECT_MS = 1000; // TCP 断线重连间隔, 单位 ms
 
-// ---- 两轮自平衡 (test10_upright 直立环 / test11_speed 串级固件) ----
+// ---- 直立环参数 (test10_upright) ----
 // I2C 引脚从 N16R8 空闲集合 {3,46,9,10,11,12} 中选取:
-//   避开 strapping 引脚 3/46, 取 9/10 (无其他复用冲突); MPU6050 模块板载上拉电阻
+// 避开 strapping 引脚 3/46, 取 9/10 (无其他复用冲突); MPU6050 模块板载上拉电阻
 
-constexpr uint8_t IMU_SDA_PIN = 10; // MPU6050 SDA
-constexpr uint8_t IMU_SCL_PIN = 9;  // MPU6050 SCL
+constexpr uint8_t IMU_SDA_PIN = 10;         // MPU6050 SDA
+constexpr uint8_t IMU_SCL_PIN = 9;          // MPU6050 SCL
+constexpr uint32_t IMU_FAIL_LOOP_MS = 1000; // IMU 探测失败死循环延时, 单位 ms (便于排查接线)
 
 constexpr uint32_t BALANCE_PERIOD_MS = 5;     // 控制节拍, 单位 ms (200Hz, 三环统一节拍)
 constexpr uint32_t BALANCE_STACK_SIZE = 4096; // balance_task 任务栈字节数
 constexpr uint8_t BALANCE_TASK_PRIO = 5;      // 任务优先级 (硬实时控制, 高于网络类任务)
 constexpr uint8_t BALANCE_TASK_CORE = 1;      // 任务核心号 (避开 core0 的 WiFi 协议栈抖动)
-
-constexpr float BALANCE_KP = 25.0f; // 直立环比例增益, 单位 PWM/deg (经验起点, 待实测整定)
-constexpr float BALANCE_KI = 0.0f;  // 直立环积分增益 (库层强制纯 PD 忽略 ki_, 此处仅占位勿改)
-constexpr float BALANCE_KD = 0.5f;  // 直立环微分增益, 单位 PWM/(deg/s), D 项用陀螺仪角速度
-constexpr float BALANCE_PWM_LIMIT = 255.0f;    // 直立环输出限幅, 对齐 MCPWM 占空比范围
-constexpr float BALANCE_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身静止站立的平均 pitch 后修正
-
-constexpr float BALANCE_ARM_ANGLE_DEG = 8.0f;    // 起控阈值: |pitch| 小于该值才使能输出
-constexpr float BALANCE_FALL_ANGLE_DEG = 45.0f;  // 倒地保护阈值: |pitch| 大于该值立即停机
-constexpr uint32_t BALANCE_CALM_DELAY_MS = 2000; // 校准前静置时长, 单位 ms
-constexpr uint16_t BALANCE_CALIB_CYCLES =
-    40;                                    // 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
 constexpr uint32_t BALANCE_PRINT_MS = 100; // 状态打印周期, 100ms = 10Hz; 打印判定见其使用处 if 判断
 
-constexpr uint32_t IMU_FAIL_LOOP_MS = 1000; // IMU 探测失败死循环延时, 单位 ms (便于排查接线)
-constexpr uint32_t IDLE_LOOP_MS = 1000;     // 主循环空转延时, 单位 ms (控制全在 balance_task)
+constexpr float UPRIGHT_KP = 47.5f;            // 直立环比例增益, 单位 PWM/deg, 震荡临界 47.5
+constexpr float UPRIGHT_KI = 0.0f;             // 直立环积分增益 (占位)
+constexpr float UPRIGHT_KD = 2.25f;            // 直立环微分增益, 单位 PWM/(deg/s), 震荡临界 2.25
+constexpr float UPRIGHT_PWM_LIMIT = 100.0f;    // 直立环输出限幅, 占空比百分比语义为 0~100
+constexpr float UPRIGHT_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身静止站立的平均 pitch 后修正
 
-// ---- 速度环参数 (test11_speed 串级固件) ----
+constexpr float UPRIGHT_ARM_ANGLE_DEG = 8.0f;    // 起控阈值: |pitch| 小于该值才使能输出
+constexpr float UPRIGHT_FALL_ANGLE_DEG = 45.0f;  // 倒地保护阈值: |pitch| 大于该值立即停机
+constexpr uint32_t UPRIGHT_CALM_DELAY_MS = 2000; // 校准前静置时长, 单位 ms
+// 中值标定采样周期数 (40 * 5ms = 0.2s, 'c' 在线标定均值)
+constexpr uint16_t UPRIGHT_CALIB_CYCLES = 40;
+
+constexpr uint32_t IDLE_LOOP_MS = 1000; // 主循环空转延时, 单位 ms (控制全在 balance_task)
+
+// ---- 速度环参数 (test11_speed) ----
 // 速度环为外环 (PI, 无 D), 输出为期望角度增量 (deg), 叠加到 theta_0 后作为直立环目标:
-//   target_angle = speed_output + theta_0, 对应 docs 3.3 串级公式 ③
+// target_angle = speed_output + theta_0, 对应 docs 3.3 串级公式 ③
 // 注意: update_pwm_speed 输出经四舍五入取整为 int16_t, 分辨率 1deg, 整定时留意
 
-constexpr float SPEED_KP = 2.0f; // 速度环比例增益, 单位 deg/(mm/s) (经验起点, 待实测整定)
-constexpr float SPEED_KI = 0.1f; // 速度环积分增益, 单位 deg/(mm/s)
-constexpr float SPEED_KD = 0.0f; // 速度环微分增益 (PI 无 D 项, 此处仅占位勿改)
-constexpr float SPEED_OUTPUT_LIMIT = 10.0f; // 速度环输出限幅 (角度增量, deg), 防目标角过大失衡
-constexpr float SPEED_SETPOINT_MM_S = 0.0f; // 默认目标速度, 单位 mm/s ('w'/'x' 串口调整)
-constexpr float SPEED_STEP_MM_S = 10.0f;    // 串口调速步进, 单位 mm/s ('w' 加 / 'x' 减)
+constexpr float SPEED_KP = 1.0f;              // 速度环比例增益, 单位 deg/(mm/s)
+constexpr float SPEED_KI = SPEED_KP * 0.005f; // 速度环积分增益, 经验上为 KP 的 1/200
+constexpr float SPEED_KD = 0.0f;              // 速度环微分增益 (PI 无 D 项, 此处仅占位勿改)
+constexpr float SPEED_OUTPUT_LIMIT = 10.0f;   // 速度环输出限幅 (角度增量, deg), 防目标角过大失衡
+constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s ('w'/'x' 串口调整)
+constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('w' 加 / 'x' 减)
 
-// ---- 转向环参数 (test12_turn 转向固件) ----
+// ---- 转向环参数 (test12_turn) ----
 // 转向环为差模量 Δ, 对称叠加进左右轮: pwm_L = base + Δ, pwm_R = base - Δ (docs 5.2)
 // 模式 A 抑制转向(默认): Δ = -TURN_KD*ωz, 复用 update_pwm (target=0, kp 装 TURN_KD), 阻尼自发偏航走直线
 // 模式 B 开环转动:        Δ = TURN_KP*θ_target, 用 update_pwm_turn_openloop (docs 5.3 模式 B)
@@ -170,8 +170,8 @@ constexpr float SPEED_STEP_MM_S = 10.0f;    // 串口调速步进, 单位 mm/s (
 constexpr float TURN_KD = 0.2f; // 抑制转向阻尼增益, 单位 PWM/(deg/s) (经验起点, 待实测整定)
 constexpr float TURN_KP = 0.2f; // 开环转动比例增益, 单位 PWM/deg (经验起点, 待实测整定)
 constexpr float TURN_KI = 0.0f; // 转向环积分增益 (无 I 项, 占位勿改)
-constexpr float TURN_KD_DISABLED =
-    0.0f; // 转向环微分增益 (无 D 项, 占位勿改; 阻尼由 TURN_KD 装于 kp 槽实现)
+// 转向环微分增益 (无 D 项, 占位勿改; 阻尼由 TURN_KD 装于 kp 槽实现)
+constexpr float TURN_KD_DISABLED = 0.0f;
 constexpr float TURN_PWM_LIMIT = 60.0f;      // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
 constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 deg ('l'/'r' 每次步进)
 
@@ -182,8 +182,8 @@ constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 de
 
 constexpr float CMD_MAX_LINEAR_MM_S = 300.0f;   // /cmd_vel linear.x 限幅, 单位 mm/s
 constexpr float CMD_MAX_ANGULAR_DEG_S = 150.0f; // /cmd_vel angular.z 限幅, 单位 deg/s
-constexpr float RAD_S_TO_DEG_S =
-    57.2958f; // rad/s -> deg/s (偏航角速度换算, 避开 Arduino 宏 RAD_TO_DEG)
+// rad/s -> deg/s (偏航角速度换算, 避开 Arduino 宏 RAD_TO_DEG)
+constexpr float RAD_S_TO_DEG_S = 57.2958f;
 constexpr char BALANCE_ENABLE_TOPIC[] = "/balance_enable"; // 武装使能话题 (std_msgs/Bool)
 
 #endif // ROBOTCONFIG_H

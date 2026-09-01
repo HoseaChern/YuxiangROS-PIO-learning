@@ -158,8 +158,8 @@ $$
 | \(\theta_0\) | `zero_pitch_deg` | 机械中值（期望倾角）         | 人工实测（`'c'` 标定）    |
 | \(\theta\)   | `theta`          | 控制俯仰角（后倾为正）       | `theta = mpu.getAngleY()` |
 | \(\omega\)   | `omega`          | 控制角速度（后倾方向为正）   | `omega = mpu.getGyroY()`  |
-| \(K_p\)      | `BALANCE_KP`     | 比例增益，单位 `PWM/deg`     | 待实测整定                |
-| \(K_d\)      | `BALANCE_KD`     | 微分增益，单位 `PWM/(deg/s)` | 待实测整定                |
+| \(K_p\)      | `UPRIGHT_KP`     | 比例增益，单位 `PWM/deg`     | 待实测整定                |
+| \(K_d\)      | `UPRIGHT_KD`     | 微分增益，单位 `PWM/(deg/s)` | 待实测整定                |
 
 公式中的 \(\theta\) 和 \(\omega\) 即陀螺仪原始读数，\(\theta_0\) 由我们手动测得。注意 \(K_d\) 项系数为负（见 1.4 推导），与标准 PID 中「误差差分 \(e_k - e_{k-1}\)」方向一致——因为该差分等于 \(-\omega\)。
 
@@ -174,9 +174,9 @@ $$
 直立环 PD 直接交由 `PIDController` 库实现（外部微分变体），不再手写，也无额外封装函数。完整调用（源码见 `src/tests/test10_upright/main.cpp`）：
 
 ```cpp
-// setup: 配置 P/I/D 增益与输出限幅 (直立环为纯 PD, 库层强制无 I 项, BALANCE_KI 仅占位)
-balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
-balance_pid.output_limit(BALANCE_PWM_LIMIT);
+// setup: 配置 P/I/D 增益与输出限幅 (直立环为纯 PD, 库层强制无 I 项, UPRIGHT_KI 仅占位)
+balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
+balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
 // 每 5ms 控制周期: 读 IMU 后直接调用库计算直立环输出
 const float theta = mpu.getAngleY();  // 控制俯仰角(后倾为正): 直接采用传感器原始读数
@@ -187,7 +187,7 @@ const float inputs[2] = { theta, omega };               // [角度, 角速度]
 const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, inputs); // = Kp*(theta_0 - theta) - Kd*omega
 ```
 
-- `zero_pitch_deg` 即符号 \(\theta_0\)（机械中值），初始取自 `config.h` 的 `BALANCE_ZERO_PITCH_DEG`，可由串口 `'c'` 在线标定。
+- `zero_pitch_deg` 即符号 \(\theta_0\)（机械中值），初始取自 `config.h` 的 `UPRIGHT_ZERO_PITCH_DEG`，可由串口 `'c'` 在线标定。
 - `theta`、`omega` 直接采用传感器原始读数（后倾为正，见 1.6 方向约定），`update_pwm_upright` 内部 `d_error = -rate` 恰得 \(-K_d \cdot \omega\)。
 - `update_pwm_upright` 内部取 `d_error = -rate`（`rate` 即 \(\omega\) 原始读数），输出 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
 - 起控进入 `kRunning` 前调用 `balance_pid.reset()`，清零上一拍的误差差分/积分，避免停车或标定期间的残留影响首次输出。
@@ -325,8 +325,8 @@ $$
 // setup: 配置速度环 PI (外环, 无 D 项) 与直立环 PD (内环, 库层强制纯 PD)
 speed_pid.update_pid(SPEED_KP, SPEED_KI, 0.0f);
 speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
-balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
-balance_pid.output_limit(BALANCE_PWM_LIMIT);
+balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
+balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
 // 每 5ms 控制周期: 读 IMU + 编码器测速 (两轮平均, mm/s)
 const float theta = mpu.getAngleY();       // 控制俯仰角(后倾为正): 直接采用传感器原始读数
