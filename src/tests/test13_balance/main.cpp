@@ -202,7 +202,7 @@ void enable_callback(const void* msg) {
  * 与 test12 同构: 非阻塞逐周期采样, 不 delay 阻塞控制节拍。
  * 字符集: 's' 武装/解除 (等价 /balance_enable 翻转), 'c' 标定机械中值 (仅 kIdle)。
  *
- * @param theta 当前控制角 (deg, 前倾为正), 标定时逐周期累加求平均
+ * @param theta 当前控制角 (deg, 后倾为正), 标定时逐周期累加求平均
  */
 void handle_serial_command(float theta) {
     static uint16_t calib_remaining = 0; // 标定剩余采样次数, 0 表示未在采样
@@ -254,8 +254,8 @@ void handle_serial_command(float theta) {
 void control_step() {
     // 1. 姿态读取: mpu.update() 必须先于 getAngle/getGyro, 否则数据不刷新
     mpu.update();
-    const float theta = -mpu.getAngleY();      // 控制角 (deg): 前倾为正
-    const float omega_pitch = -mpu.getGyroY(); // 俯仰角速度 (deg/s): 前倾为正
+    const float theta = mpu.getAngleY();      // 控制角 (deg): 后倾为正
+    const float omega_pitch = mpu.getGyroY(); // 俯仰角速度 (deg/s): 后倾为正
     const float omega_z = mpu.getGyroZ();      // 偏航角速度 (deg/s): 左转为正
 
     // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈

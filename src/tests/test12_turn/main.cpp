@@ -12,8 +12,8 @@
  *   模式 B 开环转动: Δ = TURN_KP*θ_target, 用 update_pwm_turn_openloop (docs 5.3 模式 B)
  *
  * 方向约定 (沿用 test10/test11):
- *   前进方向为 -X, "前倾"时 getAngleY 为正; 控制坐标系统一"前倾为正": theta = -getAngleY(),
- *   omega_pitch = -getGyroY(), omega_z = getGyroZ()。
+ *   前进方向为 -X, "前倾"时 getAngleY 为负; 直接采用传感器原始读数: theta = getAngleY(),
+ *   omega_pitch = getGyroY(), omega_z = getGyroZ() (后倾为正)。
  *   转向差速符号 (docs 5.2): pwm_L = base + Δ 且 Δ>0 → 左轮快 → 右转 (顺时针);
  *   故左转指令取负、右转取正; 实测反向时调换 'l'/'r' 符号即可。模式 A 符号自洽:
  *   车左转时 ωz>0, Δ = -TURN_KD*ωz < 0 → 右轮快 → 反向阻尼, 无需额外取负。
@@ -179,7 +179,7 @@ void configure_turn_pid() {
  *       符号约定: Δ>0 → 右转 (见文件头方向约定), 故 'l' 左转取负、'r' 右转取正, 实测反向时调换。
  *   'o' 开环转角归零: 目标转角回 0 (两种模式均可用, 开环模式下即恢复直行)。
  *
- * @param theta 当前控制角 theta (deg, 前倾为正), 'c' 标定时用于累加采样
+ * @param theta 当前控制角 theta (deg, 后倾为正), 'c' 标定时用于累加采样
  */
 void handle_serial_command(float theta) {
     // 中值标定采样状态仅本函数内使用, 按最小作用域原则设为函数内局部静态 (跨周期保留)
@@ -285,16 +285,16 @@ void handle_serial_command(float theta) {
  * @brief 单周期控制步骤: 读 IMU + 测速 -> 命令处理(含在线标定采样) -> 状态机 -> 共模串级 + 差模转向 -> 文本打印
  *
  * 由 balance_task 以 5ms 固定节拍调用。内部顺序即完整控制链路:
- * 先更新传感器数据(读取处对 pitch 取负统一"前倾为正", Z 轴角速度直接取)与编码器速度,
+ * 先更新传感器数据(俯仰/角速度直接取原始读数, Z 轴角速度同样直接取)与编码器速度,
  * 再响应串口命令 (机械中值在线标定内聚于 handle_serial_command), 然后按状态机决定本轮 PWM
  * (运行态执行 速度环 PI -> 直立环 PD 串级得到共模 base, 转向环得到差模 Δ,
  *  合成 pwm_L = base + Δ, pwm_R = base - Δ), 最后以低频文本行打印状态供串口监视器观察。
  */
 void control_step() {
-    // 1. 更新姿态: 控制坐标系统一为"前倾为正" (前进方向为 -X, 见文件头方向约定)
+    // 1. 更新姿态: 直接采用传感器原始读数 (后倾为正, 见文件头方向约定)
     mpu.update();
-    const float theta = -mpu.getAngleY();      // theta: 控制俯仰角 (deg), 前倾为正
-    const float omega_pitch = -mpu.getGyroY(); // omega_pitch: 控制俯仰角速度 (deg/s), 前倾方向为正
+    const float theta = mpu.getAngleY();      // theta: 控制俯仰角 (deg), 后倾为正
+    const float omega_pitch = mpu.getGyroY(); // omega_pitch: 控制俯仰角速度 (deg/s), 后倾方向为正
     const float omega_z = mpu.getGyroZ();      // omega_z: 偏航角速度 (deg/s), 用作转向环反馈/阻尼
 
     // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈

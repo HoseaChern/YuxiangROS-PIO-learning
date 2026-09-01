@@ -88,17 +88,17 @@ $$
 
 #### 1.6 变量与符号约定
 
-先约定坐标方向：车体前进方向为 \(x\) 负方向，故「前倾」时 MPU6050 `getAngleY` 读出正值。为统一「前倾为正」的控制坐标系，在代码读取处对 \(\theta\)、\(\omega\) 各取负号（`theta = -getAngleY()`、`omega = -getGyroY()`），即下表 \(\theta\)/\(\omega\) 均为**控制坐标**而非传感器原始读数。前提：正 PWM 驱动两轮向车头（前进）方向转动；若实测反向，应反接电机而不是取负（见 2.5）。
+先约定坐标方向：车体前进方向为 \(x\) 负方向，故「前倾」时 MPU6050 `getAngleY` 读出负值。代码直接采用传感器原始读数作为控制量（`theta = getAngleY()`、`omega = getGyroY()`），下表 \(\theta\)/\(\omega\) 即传感器读数，坐标统一「后倾为正」（前倾为负）。PID 库契约（误差 = 目标 − 实际，微分项取 −角速度）保持不变，整体极性经实机验证通过。前提：正 PWM 驱动两轮向车头（前进）方向转动；若实测反向，应反接电机而不是取负（见 2.5）。
 
-| 符号         | 代码变量         | 含义                         | 来源                       |
-| ------------ | ---------------- | ---------------------------- | -------------------------- |
-| \(\theta_0\) | `zero_pitch_deg` | 机械中值（期望倾角）         | 人工实测（`'c'` 标定）     |
-| \(\theta\)   | `theta`          | 控制俯仰角（前倾为正）       | `theta = -mpu.getAngleY()` |
-| \(\omega\)   | `omega`          | 控制角速度（前倾方向为正）   | `omega = -mpu.getGyroY()`  |
-| \(K_p\)      | `BALANCE_KP`     | 比例增益，单位 `PWM/deg`     | 待实测整定                 |
-| \(K_d\)      | `BALANCE_KD`     | 微分增益，单位 `PWM/(deg/s)` | 待实测整定                 |
+| 符号         | 代码变量         | 含义                         | 来源                      |
+| ------------ | ---------------- | ---------------------------- | ------------------------- |
+| \(\theta_0\) | `zero_pitch_deg` | 机械中值（期望倾角）         | 人工实测（`'c'` 标定）    |
+| \(\theta\)   | `theta`          | 控制俯仰角（后倾为正）       | `theta = mpu.getAngleY()` |
+| \(\omega\)   | `omega`          | 控制角速度（后倾方向为正）   | `omega = mpu.getGyroY()`  |
+| \(K_p\)      | `BALANCE_KP`     | 比例增益，单位 `PWM/deg`     | 待实测整定                |
+| \(K_d\)      | `BALANCE_KD`     | 微分增益，单位 `PWM/(deg/s)` | 待实测整定                |
 
-公式中的 \(\theta\) 和 \(\omega\) 为控制坐标（为取负后的陀螺仪读数），\(\theta_0\) 由我们手动测得。注意 \(K_d\) 项系数为负（见 1.4 推导），与标准 PID 中「误差差分 \(e_k - e_{k-1}\)」方向一致——因为该差分等于 \(-\omega\)。
+公式中的 \(\theta\) 和 \(\omega\) 即陀螺仪原始读数，\(\theta_0\) 由我们手动测得。注意 \(K_d\) 项系数为负（见 1.4 推导），与标准 PID 中「误差差分 \(e_k - e_{k-1}\)」方向一致——因为该差分等于 \(-\omega\)。
 
 代码中该 D 项由 `PIDController::update_pwm_upright` 实现：其内部取 `d_error = -rate`（`rate` 即 \(\omega\)），代入 \(u_k = K_p \cdot e_k + K_d \cdot d\_error\) 恰得 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)。
 
@@ -116,8 +116,8 @@ balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
 balance_pid.output_limit(BALANCE_PWM_LIMIT);
 
 // 每 5ms 控制周期: 读 IMU 后直接调用库计算直立环输出
-const float theta = -mpu.getAngleY();  // 控制俯仰角(前倾为正): 前进方向为 -X, 读取处取负
-const float omega = -mpu.getGyroY();   // 控制角速度(前倾方向为正)
+const float theta = mpu.getAngleY();  // 控制俯仰角(后倾为正): 直接采用传感器原始读数
+const float omega = mpu.getGyroY();   // 控制角速度(后倾方向为正)
 
 const float inputs[2] = { theta, omega };               // [角度, 角速度]
 // update_pwm_upright: 目标角度直接入参 (此处为机械中值 theta_0; 串级时改为 速度环输出 + theta_0)
@@ -125,8 +125,8 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, input
 ```
 
 - `zero_pitch_deg` 即符号 \(\theta_0\)（机械中值），初始取自 `config.h` 的 `BALANCE_ZERO_PITCH_DEG`，可由串口 `'c'` 在线标定。
-- `theta`、`omega` 在读取处取负，统一「前倾为正」的控制坐标（见 1.6 方向约定），使被测角速度经 `update_pwm_upright` 内部 `d_error = -rate` 后恰好得到 \(-K_d \cdot \omega\)。
-- `update_pwm_upright` 内部取 `d_error = -rate`（`rate` 即取负后的 \(\omega\)），输出 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
+- `theta`、`omega` 直接采用传感器原始读数（后倾为正，见 1.6 方向约定），`update_pwm_upright` 内部 `d_error = -rate` 恰得 \(-K_d \cdot \omega\)。
+- `update_pwm_upright` 内部取 `d_error = -rate`（`rate` 即 \(\omega\) 原始读数），输出 \(K_p \cdot (\theta_0 - \theta) - K_d \cdot \omega\)，与 1.5 一致；输出限幅到 `±output_limit_` 并四舍五入取整，均封装于库内。
 - 起控进入 `kRunning` 前调用 `balance_pid.reset()`，清零上一拍的误差差分/积分，避免停车或标定期间的残留影响首次输出。
 - **极性校验先于调参（人工串口观察）**：手扶车体前倾，轮子应向车头方向追；若反向，对调 `config.h` 中该电机 `PIN_A/PIN_B` 定义。可从串口状态行 `theta` 变化趋势与 `pwm` 符号人工判断方向（已移除自检命令，见 2.3）。
 
@@ -266,8 +266,8 @@ balance_pid.update_pid(BALANCE_KP, BALANCE_KI, BALANCE_KD);
 balance_pid.output_limit(BALANCE_PWM_LIMIT);
 
 // 每 5ms 控制周期: 读 IMU + 编码器测速 (两轮平均, mm/s)
-const float theta = -mpu.getAngleY();       // 控制俯仰角(前倾为正)
-const float omega = -mpu.getGyroY();        // 控制角速度(前倾方向为正)
+const float theta = mpu.getAngleY();       // 控制俯仰角(后倾为正): 直接采用传感器原始读数
+const float omega = mpu.getGyroY();        // 控制角速度(后倾方向为正)
 const float speed_mm_s = measure_speed_mm_s(); // 差值法同 test03, 单位 mm/s
 
 // 速度环 (外环, PI): output = Kp'*(v_set - v) + Ki'*Σe, 输出为期望角度增量 (deg)
@@ -474,11 +474,11 @@ test12 的串口遥控（`w`/`x` 定速、`l`/`r` 开环转角）受线缆长度
 
 #### 7.1 话题约定与指令限幅
 
-| 话题 | 类型 | 字段 | 映射 |
-| ---- | ---- | ---- | ---- |
-| `/cmd_vel` | `geometry_msgs/Twist` | `linear.x` | 速度环目标 \(v_{set}\)（m/s → mm/s） |
-| `/cmd_vel` | `geometry_msgs/Twist` | `angular.z` | 偏航角速度目标 \(\omega_{z,set}\)（rad/s → deg/s） |
-| `/balance_enable` | `std_msgs/Bool` | `data` | `true` 请求武装 / `false` 请求解除 |
+| 话题              | 类型                  | 字段        | 映射                                               |
+| ----------------- | --------------------- | ----------- | -------------------------------------------------- |
+| `/cmd_vel`        | `geometry_msgs/Twist` | `linear.x`  | 速度环目标 \(v_{set}\)（m/s → mm/s）               |
+| `/cmd_vel`        | `geometry_msgs/Twist` | `angular.z` | 偏航角速度目标 \(\omega_{z,set}\)（rad/s → deg/s） |
+| `/balance_enable` | `std_msgs/Bool`       | `data`      | `true` 请求武装 / `false` 请求解除                 |
 
 `teleop_twist_keyboard` 默认 `linear.x = 0.5 m/s`、`angular.z = 1.0 rad/s`，超出平衡车调节能力，固件侧限幅兜底：
 
@@ -509,12 +509,12 @@ test12 转向环的模式 A（走直线阻尼）与模式 B（开环步进转角
 
 #### 8.1 工程配置与依赖
 
-| 项 | 值 |
-| ---- | ---- |
-| 环境 | `[env:test13_balance]` |
-| 源码过滤 | `build_src_filter = +<tests/test13_balance>` |
-| micro-ROS 传输 | `board_microros_transport = wifi` |
-| 依赖库 | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`micro_ros_platformio`、`WiFi` |
+| 项             | 值                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------- |
+| 环境           | `[env:test13_balance]`                                                                 |
+| 源码过滤       | `build_src_filter = +<tests/test13_balance>`                                           |
+| micro-ROS 传输 | `board_microros_transport = wifi`                                                      |
+| 依赖库         | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`micro_ros_platformio`、`WiFi` |
 
 `platformio.ini` 公共段默认 `lib_ignore = micro_ros_platformio`（避免其他环境触发 micro-ROS 钩子），`test13_balance` 用空 `lib_ignore =` 覆盖解除，与主环境、`test06/07/08` 保持一致。
 

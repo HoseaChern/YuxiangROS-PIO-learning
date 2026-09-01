@@ -8,10 +8,9 @@
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 直立环公式):
  *       PWM = Kp * (theta_0 - theta) - Kd * omega
  *   即 Kp*e_k - Kd*omega, D 项系数为负 (陀螺仪角速度, 见 1.4 符号推导)。
- *   方向约定: 小车前进方向为 x 负方向, 故"前倾"时 getAngleY 读数为正;
- *   为统一"前倾为正"的控制坐标系, 在读取处对 theta/omega 各取负号:
- *       theta = -mpu.getAngleY() (控制俯仰角, 前倾为正)
- *       omega = -mpu.getGyroY()  (控制角速度, 前倾方向为正)
+ *   方向约定: 小车前进方向为 x 负方向, 故"前倾"时 getAngleY 读数为负;
+ *   直接采用传感器原始读数作为控制量: theta = mpu.getAngleY(), omega = mpu.getGyroY() (后倾为正)。
+ *   PID 库契约不变 (误差 = 目标 - 实际, 微分项取 -rate, 见 1.4 符号推导), 极性经实机验证通过。
  *   前提: 正 PWM 驱动两轮向车头(即前进)方向转动; 若实测反向, 应反接电机而非取负。
  *   theta_0  = zero_pitch_deg  (机械中值, 'c' 在线标定)。
  *
@@ -118,7 +117,7 @@ namespace {
  *       随后每个控制周期由本函数逐周期累加 theta, 取 0.2s 均值作为 theta_0,
  *       采样期间小车保持静止, 完成即自动生效并打印结果。
  *
- * @param theta 当前控制角 theta (deg, 前倾为正), 'c' 标定时用于累加采样
+ * @param theta 当前控制角 theta (deg, 后倾为正), 'c' 标定时用于累加采样
  */
 void handle_serial_command(float theta) {
     // 中值标定采样状态仅本函数内使用, 按最小作用域原则设为函数内局部静态 (跨周期保留)
@@ -167,15 +166,15 @@ void handle_serial_command(float theta) {
  * @brief 单周期控制步骤: 读 IMU -> 命令处理(含在线标定采样) -> 状态机 -> PD 输出 -> 文本打印
  *
  * 由 balance_task 以 5ms 固定节拍调用。内部顺序即完整控制链路:
- * 先更新传感器数据(读取处对 theta/omega 取负, 统一"前倾为正"), 再响应串口命令
+ * 先更新传感器数据(直接采用原始读数, 后倾为正), 再响应串口命令
  * (机械中值在线标定内聚于 handle_serial_command), 然后按状态机决定本轮 PWM,
  * 最后以低频文本行打印状态供串口监视器观察。
  */
 void control_step() {
-    // 1. 更新姿态: 控制坐标系统一为"前倾为正" (前进方向为 -X, 见文件头方向约定)
+    // 1. 更新姿态: 直接采用传感器原始读数 (后倾为正, 见文件头方向约定)
     mpu.update();
-    const float theta = -mpu.getAngleY(); // theta: 控制俯仰角 (deg), 前倾为正
-    const float omega = -mpu.getGyroY();  // omega: 控制角速度 (deg/s), 前倾方向为正
+    const float theta = mpu.getAngleY(); // theta: 控制俯仰角 (deg), 后倾为正
+    const float omega = mpu.getGyroY();  // omega: 控制角速度 (deg/s), 后倾方向为正
 
     // 2. 处理串口命令
     handle_serial_command(theta);

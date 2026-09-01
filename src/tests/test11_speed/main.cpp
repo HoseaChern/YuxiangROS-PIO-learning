@@ -12,8 +12,8 @@
  *   其中 v_set 为期望车体速度 (mm/s, 串口 'w'/'x' 调整), v 为编码器反馈速度 (两轮平均, mm/s)。
  *
  * 方向约定 (沿用 test10):
- *   小车前进方向为 x 负方向, "前倾"时 getAngleY 读数为正;
- *   控制坐标系统一"前倾为正": theta = -mpu.getAngleY(), omega = -mpu.getGyroY()。
+ *   小车前进方向为 x 负方向, "前倾"时 getAngleY 读数为负;
+ *   直接采用传感器原始读数: theta = mpu.getAngleY(), omega = mpu.getGyroY() (后倾为正)。
  *   正 PWM 驱动两轮向车头(即前进)方向转动; 若实测反向, 应反接电机而非取负。
  *   编码器读数方向: 前进时 getTicks 递增, 故前进速度 v 为正; 若实测反向, 应取负或反接。
  *   theta_0 = zero_pitch_deg ('c' 在线标定)。
@@ -143,7 +143,7 @@ namespace {
  *   'w'/'x' 目标速度调整: 每按一次按 SPEED_STEP_MM_S 步进加减 (运行中/停止均可)。
  *   'v' 显示当前目标速度与反馈速度。
  *
- * @param theta 当前控制角 theta (deg, 前倾为正), 'c' 标定时用于累加采样
+ * @param theta 当前控制角 theta (deg, 后倾为正), 'c' 标定时用于累加采样
  */
 void handle_serial_command(float theta) {
     // 中值标定采样状态仅本函数内使用, 按最小作用域原则设为函数内局部静态 (跨周期保留)
@@ -209,15 +209,15 @@ void handle_serial_command(float theta) {
  * @brief 单周期控制步骤: 读 IMU + 测速 -> 命令处理(含在线标定采样) -> 状态机 -> 串级输出 -> 文本打印
  *
  * 由 balance_task 以 5ms 固定节拍调用。内部顺序即完整控制链路:
- * 先更新传感器数据(读取处对 theta/omega 取负, 统一"前倾为正")与编码器速度,
+ * 先更新传感器数据(直接采用原始读数, 后倾为正)与编码器速度,
  * 再响应串口命令 (机械中值在线标定内聚于 handle_serial_command), 然后按状态机决定本轮 PWM
  * (运行态执行 速度环 PI -> 直立环 PD 串级), 最后以低频文本行打印状态供串口监视器观察。
  */
 void control_step() {
-    // 1. 更新姿态: 控制坐标系统一为"前倾为正" (前进方向为 -X, 见文件头方向约定)
+    // 1. 更新姿态: 直接采用传感器原始读数 (后倾为正, 见文件头方向约定)
     mpu.update();
-    const float theta = -mpu.getAngleY(); // theta: 控制俯仰角 (deg), 前倾为正
-    const float omega = -mpu.getGyroY();  // omega: 控制角速度 (deg/s), 前倾方向为正
+    const float theta = mpu.getAngleY(); // theta: 控制俯仰角 (deg), 后倾为正
+    const float omega = mpu.getGyroY();  // omega: 控制角速度 (deg/s), 后倾方向为正
 
     // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈
     int32_t ticks[2] = {encoders[MOTOR_LEFT].getTicks(), encoders[MOTOR_RIGHT].getTicks()};
