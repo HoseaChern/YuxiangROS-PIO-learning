@@ -44,7 +44,7 @@ int16_t PIDController::update_pwm(float current) {
  *   D 项外部微分: 对含噪角度做数值微分会把噪声放大约 1/T，改用陀螺仪角速度规避;
  *   符号 e = target - angle，故 Δe = -(角速度)，即取角速度的相反数。
  *
- * @param target 期望角度（直立环目标，如 theta_0 或 速度环输出 + theta_0）
+ * @param target 期望角度（直立环目标，如 theta_0 或 theta_0 - 速度环输出）
  * @param inputs [PID_INPUT_ANGLE]=角度, [PID_INPUT_ANGULAR_RATE]=角速度
  * @return PWM 输出，四舍五入取整，范围 ±output_limit_
  */

@@ -165,4 +165,4 @@ int16_t pwm = pid.update_pwm(current_speed);
 - `update_pid()` 不重置内部状态，历史保留。
 - 构造后须先 `output_limit()` 设定限幅，否则输出恒为 0（默认 `output_limit_ = 0.0f`）。
 - 同一实例勿混用多个更新变体（共享积分状态）；直立环与速度环应各用独立实例。
-- 串级嵌套在调用方实现：速度环输出 + $\theta_0$ 作为 `update_pwm_upright` 的 `target` 入参，两方法类内互不调用。
+- 串级嵌套在调用方实现：$\theta_0$ - 速度环输出 作为 `update_pwm_upright` 的 `target` 入参，两方法类内互不调用。

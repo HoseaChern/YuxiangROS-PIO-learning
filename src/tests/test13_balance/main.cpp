@@ -333,8 +333,8 @@ void control_step() {
         // 速度环 PI (外环): 目标 v_set (mm/s), 输出为期望角度增量 (deg), 限幅防目标角过大
         const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
 
-        // 直立环 PD (内环): 目标 = 速度环输出 + 机械中值, 输入为 [角度, 角速度] 数组
-        const float target_angle = static_cast<float>(speed_output) + zero_pitch_deg;
+        // 直立环 PD (内环): 目标 = 机械中值 - 速度环输出, 输入为 [角度, 角速度] 数组
+        const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
         const float inputs[2] = {theta, omega_pitch};
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 

@@ -151,8 +151,8 @@ constexpr uint16_t UPRIGHT_CALIB_CYCLES = 40;
 constexpr uint32_t IDLE_LOOP_MS = 1000; // 主循环空转延时, 单位 ms (控制全在 balance_task)
 
 // ---- 速度环参数 (test11_speed) ----
-// 速度环为外环 (PI, 无 D), 输出为期望角度增量 (deg), 叠加到 theta_0 后作为直立环目标:
-// target_angle = speed_output + theta_0, 对应 docs 3.3 串级公式 ③
+// 速度环为外环 (PI, 无 D), 输出为期望角度增量 (deg), 从 theta_0 减去后作为直立环目标:
+// target_angle = theta_0 - speed_output, 对应 docs 3.3 串级公式 ③
 // 注意: update_pwm_speed 输出经四舍五入取整为 int16_t, 分辨率 1deg, 整定时留意
 
 constexpr float SPEED_KP = 1.0f;              // 速度环比例增益, 单位 deg/(mm/s)

@@ -347,8 +347,8 @@ void control_step() {
         // 速度环: output = Kp'*(v_set - v) + Ki'*Σe, 输出为期望角度增量 (deg)
         const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
 
-        // 串级嵌套: 直立环目标角度 = 速度环输出 + 机械中值 theta_0
-        const float target_angle = static_cast<float>(speed_output) + zero_pitch_deg;
+        // 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出
+        const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
 
         // 直立环: = Kp*(target_angle - theta) - Kd*omega (库层强制纯 PD)
         const float inputs[2] = {theta, omega_pitch}; // [角度, 角速度]

@@ -34,7 +34,7 @@ class PIDController {
     int16_t update_pwm(float current); // 数值微分变体：D 项取误差差分 Δe = e_k - e_{k-1}
 
     // 直立环变体：纯 PD（库层强制无 I 项，忽略 ki_ 不累加积分），D 项 Δe 取角速度的相反数(-omega)
-    // target 为期望角度直接入参（串级时 = 速度环输出 + theta_0，动态变化，故不入内部状态）
+    // target 为期望角度直接入参（串级时 = theta_0 - 速度环输出，动态变化，故不入内部状态）
     // inputs: [PID_INPUT_ANGLE]=角度(theta), [PID_INPUT_ANGULAR_RATE]=角速度(omega)
     int16_t update_pwm_upright(float target, const float inputs[2]);
     // 速度环变体：PI 控制（无 D 项），数学形式 u = kp*e + ki*Σe

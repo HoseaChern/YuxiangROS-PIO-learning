@@ -8,7 +8,7 @@
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 3.3 串级公式):
  *   速度环(外环, PI):  speed_output = Kp'*(v_set - v) + Ki'*Σe_j, 输出为期望角度增量 (deg)
  *   直立环(内环, PD):  PWM = Kp*(target_angle - theta) - Kd*omega
- *   串级嵌套:           target_angle = speed_output + theta_0
+ *   串级嵌套:           target_angle = theta_0 - speed_output
  *   其中 v_set 为期望车体速度 (mm/s, 串口 'w'/'x' 调整), v 为编码器反馈速度 (两轮平均, mm/s)。
  *
  * 方向约定 (沿用 test10):
@@ -265,8 +265,8 @@ void control_step() {
         // 输出为期望角度增量 (deg): speed_output = Kp'*(v_set - v) + Ki'*Σe
         const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
 
-        // 串级嵌套: 直立环目标角度 = 速度环输出 + 机械中值 theta_0 (docs 3.3 公式 ③)
-        const float target_angle = static_cast<float>(speed_output) + zero_pitch_deg;
+        // 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出 (docs 3.3 公式 ③)
+        const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
 
         // 直立环 (内环, PD): PWM = Kp*(target_angle - theta) - Kd*omega
         const float inputs[2] = {theta, omega}; // [当前角度, 当前角速度]

@@ -183,7 +183,7 @@ const float theta = mpu.getAngleY();  // 控制俯仰角(后倾为正): 直接�
 const float omega = mpu.getGyroY();   // 控制角速度(后倾方向为正)
 
 const float inputs[2] = { theta, omega };               // [角度, 角速度]
-// update_pwm_upright: 目标角度直接入参 (此处为机械中值 theta_0; 串级时改为 速度环输出 + theta_0)
+// update_pwm_upright: 目标角度直接入参 (此处为机械中值 theta_0)
 const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, inputs); // = Kp*(theta_0 - theta) - Kd*omega
 ```
 
@@ -246,7 +246,7 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, input
 1. 给定**期望速度** \(v_{set}\)（目标编码器速度）；
 2. 与**编码器反馈速度** \(v\) 相减得误差 \(e_k = v_{set} - v\)；
 3. 速度环 PI 控制器输出 `output`（期望角度增量）；
-4. 将 `output` 叠加到机械中值 \(\theta_0\) 上，作为直立环 PD 控制器的输入（期望角度）；
+4. 机械中值 \(\theta_0\) 减去 `output`，作为直立环 PD 控制器的输入（期望角度）；
 5. 直立环输出 PWM 直接作用到驱动器。
 
 **为何速度反馈直接用编码器数值**：速度的定义是单位时间内物体的位移。物理世界的 m/s 单位与编码器数值呈比例关系，为计算简便，直接采用编码器数值在单位时间内的变化量表示速度。又因为 PI 计算公式是按固定周期计算的，且编码器在固定时间内读取后直接清零，因此直接读取编码器数值就可以表示速度。
@@ -293,25 +293,29 @@ $$
 \mathrm{output} = K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j
 $$
 
-③ 将 \(\mathrm{output} + \theta_0\) 作为直立环的输入代入①：由于速度环输出的期望角度是基于机械中值基础的，因此需要加上 \(\theta_0\) 之后再带入——直立环的输入就是机械中值，因此用 \(\mathrm{output} + \theta_0\) 替换 \(\theta_0\)：
+③ 将 \(\theta_0 - \mathrm{output}\) 作为直立环的输入代入①。推导分三步：
+
+- **误差符号**：速度环误差 \(e = v_{set} - v\)（目标 − 实际）。发 `'w'` 后 \(v_{set} > 0\)（含义：要求前进），起步瞬间 \(v = 0\)，故 \(e = v_{set} - 0 > 0\)，输出 \(\mathrm{output} = K_p'\cdot e + K_i'\cdot\sum e_j > 0\)。`output` 量纲是**期望角度增量（deg）**，不是 PWM。
+- **物理机制**：平衡车无法像普通车那样"直接加大 PWM 就加速"。要让车前进，必须先让车身**向前倾斜**——车体前倾时直立环误差 \(\theta_0 - \theta > 0\)，持续输出正 PWM 让轮子向前追（防倒），前倾角越大"追"的力度越大、前向加速度越大。故"想加速"等价于"把直立环目标角往**前倾方向**调"。
+- **符号代入**：方向约定下前倾为负方向（`theta` 减小，见 1.6），`output > 0` 表示"需要更前倾"，因此新目标角为机械中值**减去**增量：\(\theta_0 - \mathrm{output}\)。用其替换①中的固定 \(\theta_0\)：
 
 $$
-\mathrm{PWM} = K_p \cdot \left( (\mathrm{output} + \theta_0) - \theta \right) - K_d \cdot \omega
+\mathrm{PWM} = K_p \cdot \left( (\theta_0 - \mathrm{output}) - \theta \right) - K_d \cdot \omega
 $$
 
 ④ 将上式展开并代回速度环，得到双环完整公式：
 
 $$
-\mathrm{PWM} = K_p \cdot \left[ K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j \right] + K_p \cdot \theta_0 - K_p \cdot \theta - K_d \cdot \omega
+\mathrm{PWM} = K_p \cdot \theta_0 - K_p \cdot \left[ K_p' \cdot (v_{set} - v) + K_i' \cdot \sum_{j=0}^{k} e_j \right] - K_p \cdot \theta - K_d \cdot \omega
 $$
 
-展开后的绿色部分正是速度环项，红色部分正是直立环项：
+展开后的绿色部分正是速度环项（负号已并入），红色部分正是直立环项：
 
 $$
-\mathrm{PWM} = \underbrace{K_p \cdot K_p' \cdot (v_{set} - v) + K_p \cdot K_i' \cdot \sum_{j=0}^{k} e_j}_{\color{green}{\text{速度环项}}} + \underbrace{K_p \cdot \theta_0 - K_p \cdot \theta - K_d \cdot \omega}_{\color{red}\text{直立环项}}
+\mathrm{PWM} = \underbrace{- K_p \cdot K_p' \cdot (v_{set} - v) - K_p \cdot K_i' \cdot \sum_{j=0}^{k} e_j}_{\color{green}{\text{速度环项}}} + \underbrace{K_p \cdot \theta_0 - K_p \cdot \theta - K_d \cdot \omega}_{\color{red}\text{直立环项}}
 $$
 
-因此这个双环 PID 的控制代码，相当于把两个环的输出结果求和后传入电机驱动器。
+因此这个双环 PID 的控制代码，相当于把速度环项（取负号后）与直立环项求和后传入电机驱动器。
 
 ### 4. 固件工程实现
 
@@ -319,7 +323,7 @@ $$
 
 #### 4.1 核心算法
 
-速度环输出经 `PIDController::update_pwm_speed` 计算（PI 变体，无 D 项），再与机械中值叠加作为直立环目标角度，交由 `update_pwm_upright`（纯 PD）。完整调用（源码见 `src/tests/test11_speed/main.cpp`）：
+速度环输出经 `PIDController::update_pwm_speed` 计算（PI 变体，无 D 项），机械中值减去速度环输出作为直立环目标角度，交由 `update_pwm_upright`（纯 PD）。完整调用（源码见 `src/tests/test11_speed/main.cpp`）：
 
 ```cpp
 // setup: 配置速度环 PI (外环, 无 D 项) 与直立环 PD (内环, 库层强制纯 PD)
@@ -336,8 +340,8 @@ const float speed_mm_s = measure_speed_mm_s(); // 差值法同 test03, 单位 mm
 // 速度环 (外环, PI): output = Kp'*(v_set - v) + Ki'*Σe, 输出为期望角度增量 (deg)
 const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
 
-// 串级嵌套: 直立环目标角度 = 速度环输出 + 机械中值 theta_0 (docs 3.3 公式 ③)
-const float target_angle = static_cast<float>(speed_output) + zero_pitch_deg;
+// 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出 (docs 3.3 公式 ③)
+const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
 
 // 直立环 (内环, PD): = Kp*(target_angle - theta) - Kd*omega
 const float inputs[2] = { theta, omega }; // [角度, 角速度]
@@ -623,14 +627,14 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 ### 调参总顺序
 
-| 阶段 | 目标                     | 关键操作                                                             | 详见    |
-| ---- | ------------------------ | -------------------------------------------------------------------- | ------- |
-| 0    | 机械中值 \(\theta_0\)    | 双向临界角度取平均；本固件用 `'c'` 在线标定                          | 2.3/2.5 |
-| 1    | 直立环 Kp 极性 → 大小    | 倾斜车体、轮转方向与倾斜一致（前倾轮向车头追）；增到低频抖动         | 2.1     |
-| 2    | 直立环 Kd 极性 → 大小    | 现象同 Kp（向哪边倾轮向哪边追）；增到高频震荡记录临界值              | 2.1     |
-| 3    | 速度环 Kp/Ki 极性 → 大小 | 轻转一轮应加速至最大转速（正反馈）、另一轮同向；增 Kp 至原地小摆稳定 | 4.4     |
-| 4    | 转向环极性 → 大小        | 模式 A 抑制直行、模式 B 开环转角                                     | 6.4     |
-| 5    | 无线联调与限幅           | 限幅参数保守调低起步冲击                                             | 8.4     |
+| 阶段 | 目标                     | 关键操作                                                          | 详见    |
+| ---- | ------------------------ | ----------------------------------------------------------------- | ------- |
+| 0    | 机械中值 \(\theta_0\)    | 双向临界角度取平均；本固件用 `'c'` 在线标定                       | 2.3/2.5 |
+| 1    | 直立环 Kp 极性 → 大小    | 倾斜车体、轮转方向与倾斜一致（前倾轮向车头追）；增到低频抖动      | 2.1     |
+| 2    | 直立环 Kd 极性 → 大小    | 现象同 Kp（向哪边倾轮向哪边追）；增到高频震荡记录临界值           | 2.1     |
+| 3    | 速度环 Kp/Ki 极性 → 大小 | 设 v_set=0 手拨轮应被抑制趋于停止；增 Kp 至原地小摆稳定（负反馈） | 4.4     |
+| 4    | 转向环极性 → 大小        | 模式 A 抑制直行、模式 B 开环转角                                  | 6.4     |
+| 5    | 无线联调与限幅           | 限幅参数保守调低起步冲击                                          | 8.4     |
 
 ### 直立环整定
 
@@ -643,9 +647,9 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 ### 速度环整定
 
-- **为何是正反馈**：平衡车调速与普通小车相反。以需要减速停下为例，普通车是减小轮速（负反馈）；但平衡车上若减小轮速，车体因惯性向前倾倒，反而要**加速轮子追上车身**、让倾角回落，此时直立环作用车才会稳定停下——因此物理上是**正反馈**。代码里 `e = target - speed` 形式上似负反馈，但因本固件前进方向与读数符号的特殊约定，整体表现为正反馈，极性校验以实测为准。
-- **Kp 极性**：可先注释直立环，轻微转动其中一个轮子，它应**持续加速直至最大转速**（另一轮反向或同向随动视差速贡献而定）；若轮子不加速反而减速、或两轮趋零，则极性错或编码器相位反（本固件前进时 `speed` 应为正，见 4.4）。
-- **Kp 大小**：从量级 1/10/100 起步逐档尝试（示例从 10 起）。
+- **本质是负反馈**：速度环作为外环，通过倾角调节使 \(v \to v_{set}\) 收敛，是标准的负反馈。以 \(v_{set} > 0\) 起步为例：误差 \(e = v_{set} - v > 0\) 使 \(\mathrm{output} > 0\)，代入后直立环目标角 \(\theta_0 - \mathrm{output} < \theta_0\)，车体**前倾加速**、轮子追上车身；接近目标速度后误差减小、目标角回到中值，车体回正匀速前进——全程收敛。需注意：平衡车调的是**倾角**而非 PWM，故轮速变化表现为"先超调后收敛"，这与"越跑越快直至倾倒"的正反馈发散有本质区别，勿将前者误判为极性反。
+- **Kp 极性**：设 \(v_{set}=0\)，手拨其中一个轮子，速度环应**抑制**它趋于停止；若轮子不减速反而加速、越转越快，则极性错或编码器相位反（正反馈发散特征）。再发 `'w'` 给正 \(v_{set}\)，轮子应稳定在目标速度附近小范围摇摆后收敛（本固件前进时 `speed` 应为正，见 4.4）。
+- **Kp 大小**：按本文档量纲 `deg/(mm/s)`，从 0.5~1 起步逐档增大（`SPEED_OUTPUT_LIMIT=10°` 时约 10~30 mm/s 误差即饱和）；勿直接照搬社区"从 10 起"（那是按 PWM 或位置环量纲的经验值）。
 - **Ki**：社区经验 \(K_i' \approx K_p'/200\)，用于消静差，无需单独整定。
 - **现象判定**：
   - 直线冲刺（角度稳但一直加速）→ Kp/Ki 不足，增大；
@@ -663,20 +667,20 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 ### 现象对照速查表
 
-| 现象                        | 可能原因                          | 对策                         |
-| --------------------------- | --------------------------------- | ---------------------------- |
-| 松手直接向一侧倒            | Kp 过小，或 Kp 极性反             | 增大 Kp；校验极性            |
-| 大幅低频抖动（越摆越大）    | Kp 过大，或 Kd 极性反             | 减小 Kp；反 Kd 极性          |
-| 高频震荡/电机尖叫           | Kd 过大                           | 立即断电，减小 Kd            |
-| 车体僵硬、起步卡顿          | Kd 过大                           | 减小 Kd                      |
-| 直线冲刺（角度稳但一直跑）  | 速度环 Kp/Ki 不足                 | 增大                         |
-| 小范围摇摆且稳定            | 参数最佳                          | 停止调整                     |
-| 向一侧冲刺/震荡             | 速度环过冲或直立环 Kd 不足        | 降 Kp/Ki，或增直立环 Kd      |
-| 轻转一轮不加速反而减速/反转 | 速度环 Kp 极性反或编码器相位反    | 调 Kp 极性；校验编码器相位   |
-| 走不直（自发偏航）          | 转向环模式 A Kd 不足/电机个体差异 | 增大模式 A Kd                |
-| 用手转车"帮忙转"（模式A）   | 转向环 Kd 极性反                  | 调反模式 A 转向符号          |
-| 转向迟缓                    | 模式 B Kp 过小                    | 增大                         |
-| 转向抖动/失衡               | 模式 B Kp 过大或 Δ 超限           | 减小 Kp；降 `TURN_PWM_LIMIT` |
+| 现象                         | 可能原因                          | 对策                         |
+| ---------------------------- | --------------------------------- | ---------------------------- |
+| 松手直接向一侧倒             | Kp 过小，或 Kp 极性反             | 增大 Kp；校验极性            |
+| 大幅低频抖动（越摆越大）     | Kp 过大，或 Kd 极性反             | 减小 Kp；反 Kd 极性          |
+| 高频震荡/电机尖叫            | Kd 过大                           | 立即断电，减小 Kd            |
+| 车体僵硬、起步卡顿           | Kd 过大                           | 减小 Kd                      |
+| 直线冲刺（角度稳但一直跑）   | 速度环 Kp/Ki 不足                 | 增大                         |
+| 小范围摇摆且稳定             | 参数最佳                          | 停止调整                     |
+| 向一侧冲刺/震荡              | 速度环过冲或直立环 Kd 不足        | 降 Kp/Ki，或增直立环 Kd      |
+| 手拨轮越转越快（正反馈发散） | 速度环 Kp 极性反或编码器相位反    | 调 Kp 极性；校验编码器相位   |
+| 走不直（自发偏航）           | 转向环模式 A Kd 不足/电机个体差异 | 增大模式 A Kd                |
+| 用手转车"帮忙转"（模式A）    | 转向环 Kd 极性反                  | 调反模式 A 转向符号          |
+| 转向迟缓                     | 模式 B Kp 过小                    | 增大                         |
+| 转向抖动/失衡                | 模式 B Kp 过大或 Δ 超限           | 减小 Kp；降 `TURN_PWM_LIMIT` |
 
 ### 安全提示
 
