@@ -298,7 +298,7 @@ $$
 
 ③ 将 \(\theta_0 - \mathrm{output}\) 作为直立环的输入代入①。推导分三步：
 
-- **误差符号**：速度环误差 \(e = v_{set} - v\)（目标 − 实际）。发 `'w'` 后 \(v_{set} > 0\)（含义：要求前进），起步瞬间 \(v = 0\)，故 \(e = v_{set} - 0 > 0\)，输出 \(\mathrm{output} = K_p'\cdot e + K_i'\cdot\sum e_j > 0\)。`output` 量纲是**期望角度增量（deg）**，不是 PWM。
+- **误差符号**：速度环误差 \(e = v_{set} - v\)（目标 − 实际）。按 `'w'` 开启运动后 \(v_{set} > 0\)（含义：要求前进），起步瞬间 \(v = 0\)，故 \(e = v_{set} - 0 > 0\)，输出 \(\mathrm{output} = K_p'\cdot e + K_i'\cdot\sum e_j > 0\)。`output` 量纲是**期望角度增量（deg）**，不是 PWM。
 - **物理机制**：平衡车无法像普通车那样"直接加大 PWM 就加速"。要让车前进，必须先让车身**向前倾斜**——车体前倾时直立环误差 \(\theta_0 - \theta > 0\)，持续输出正 PWM 让轮子向前追（防倒），前倾角越大"追"的力度越大、前向加速度越大。故"想加速"等价于"把直立环目标角往**前倾方向**调"。
 - **符号代入**：方向约定下前倾为负方向（`theta` 减小，见 1.6），`output > 0` 表示"需要更前倾"，因此新目标角为机械中值**减去**增量：\(\theta_0 - \mathrm{output}\)。用其替换①中的固定 \(\theta_0\)：
 
@@ -352,7 +352,7 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs)
 ```
 
 - 测速实现 `measure_speed_mm_s()`：每控制周期读两路编码器 tick 差值，乘以单脉冲距离并除以时间差得 mm/s（与 `test03_speed_trans` 同法），左右轮平均作为车体前进速度 \(v\)。
-- `target_speed_mm_s` 即符号 \(v_{set}\)（期望速度，mm/s），初始取自 `config.h` 的 `SPEED_SETPOINT_MM_S`，串口 `'w'`/`'x'` 按 `SPEED_STEP_MM_S` 步进调整，`'v'` 回显。
+- `target_speed_mm_s` 即符号 \(v_{set}\)（期望速度，mm/s），初始取自 `config.h` 的 `SPEED_SETPOINT_MM_S`，未武装时串口 `'+'`/`'-'` 按 `SPEED_STEP_MM_S` 步进设定；`motion_enabled`（运动使能开关，串口 `'w'` 往返切换）为假时速度环目标取 0（原地直立），为真时取 `target_speed_mm_s`。
 - `update_pwm_speed` 输出经四舍五入取整为 `int16_t`，故期望角度增量分辨率为 1°；`SPEED_OUTPUT_LIMIT` 限制目标角偏离 \(\theta_0\) 的幅度，防止外环积分饱和时目标角过大而失衡。
 - 起控进入 `kRunning` 前同时 `reset()` 速度环与直立环（清积分/差分状态），避免停车期间的积分残留。
 - 两环均为 `PIDController` 独立实例，方法类内互不调用，串级嵌套在 `control_step` 调用方实现。
@@ -363,18 +363,18 @@ const int16_t pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs)
 | ---- | ---------------- | ----------------------------------------------- |
 | `s`  | 启停武装切换     | 同 test10                                       |
 | `c`  | 机械中值在线标定 | 同 test10                                       |
-| `w`  | 目标速度 +步进   | 每按一次 `target_speed_mm_s += SPEED_STEP_MM_S` |
-| `x`  | 目标速度 -步进   | 每按一次 `target_speed_mm_s -= SPEED_STEP_MM_S` |
-| `v`  | 回显目标速度     | 打印当前 `target_speed_mm_s`                    |
+| `+`  | 目标速度 +步进   | 仅未武装有效，`target_speed_mm_s += SPEED_STEP_MM_S` |
+| `-`  | 目标速度 -步进   | 仅未武装有效，`target_speed_mm_s -= SPEED_STEP_MM_S` |
+| `w`  | 运动往返开关     | 仅运行态有效，开→按设定速度运动，关→停止运动保持直立 |
 
 #### 4.3 状态机与安全
 
-与 test10 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；速度环在 `kRunning` 内恒生效（目标速度默认 0，即先验证纯直立，再 `'w'` 提速）。倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。
+与 test10 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；起控瞬间运动使能 `motion_enabled` 清零（默认原地直立、速度环目标 0，即先验证纯直立），按 `'w'` 开启运动、再按一次停止运动但保持直立平衡。倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。
 
 #### 4.4 调参指南
 
-1. 先在 `SPEED_SETPOINT_MM_S = 0` 下验证直立环（此时速度环无扰动，行为同 test10）；
-2. 发 `'w'` 给正速度，观察车体是否前倾加速并稳定在目标速度附近；若振荡，减小 `SPEED_KP`；若速度收敛过慢或存在稳态偏差，增大 `SPEED_KI`；
+1. 先在未武装态保持目标速度 0（默认），`'s'` 武装起控后运动默认关闭（原地直立，速度环无扰动，行为同 test10）；
+2. 停止武装（`'s'`）→ 按 `'+'` 设定正速度 → 再武装 → 按 `'w'` 开启运动，观察车体是否前倾加速并稳定在目标速度附近；若振荡，减小 `SPEED_KP`；若速度收敛过慢或存在稳态偏差，增大 `SPEED_KI`；
 3. 编码器方向校验：前进时串口 `speed` 应为正；若为负，反接编码器 `PIN_A/PIN_B`（同电机极性约定）。
 
 ## 转向环
@@ -517,9 +517,9 @@ motor.updateMotorSpeed(MOTOR_RIGHT, pwm_right);
 | ---- | ---------------- | -------------------------------------------------------------------------- |
 | `s`  | 启停武装切换     | 同 test11                                                                  |
 | `c`  | 机械中值在线标定 | 同 test11                                                                  |
-| `w`  | 目标速度 +步进   | 每按一次 `target_speed_mm_s += SPEED_STEP_MM_S`                            |
-| `x`  | 目标速度 -步进   | 每按一次 `target_speed_mm_s -= SPEED_STEP_MM_S`                            |
-| `v`  | 回显目标速度     | 打印当前 `target_speed_mm_s`                                               |
+| `+`  | 目标速度 +步进   | 仅未武装有效，`target_speed_mm_s += SPEED_STEP_MM_S`                       |
+| `-`  | 目标速度 -步进   | 仅未武装有效，`target_speed_mm_s -= SPEED_STEP_MM_S`                       |
+| `w`  | 运动往返开关     | 仅运行态有效，开→按设定速度运动，关→停止运动保持直立（不影响转向差模）   |
 | `t`  | 切换转向模式     | 抑制(走直线) 与 开环转动 互切；切换时重配增益并清零目标转角                |
 | `l`  | 左转步进         | 仅开环模式有效，`turn_target_angle_deg -= TURN_ANGLE_STEP_DEG`（左转为负） |
 | `r`  | 右转步进         | 仅开环模式有效，`turn_target_angle_deg += TURN_ANGLE_STEP_DEG`             |
@@ -527,18 +527,18 @@ motor.updateMotorSpeed(MOTOR_RIGHT, pwm_right);
 
 #### 6.3 状态机与安全
 
-与 test11 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；转向环仅在 `kRunning` 内生效（`kIdle` 下输出关闭），倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。转向相关状态新增两项：`turn_mode`（当前模式）与 `turn_target_angle_deg`（开环目标转角，`'t'` 切换或 `'o'` 归零时清零，避免遗留转角指令）。
+与 test11 一致：上电默认 `kIdle`，`'s'` 武装后姿态进入中值窗口起控；转向环仅在 `kRunning` 内生效（`kIdle` 下输出关闭），倒地保护 `|\theta - \theta_0| > 45^\circ` 自动停机。转向相关状态新增两项：`turn_mode`（当前模式）与 `turn_target_angle_deg`（开环目标转角，`'t'` 切换或 `'o'` 归零时清零，避免遗留转角指令）。运动使能 `motion_enabled` 与 test11 相同（`'w'` 往返开关），且与转向差模独立：运动关闭时仍可原地转向调试。
 
 #### 6.4 调参指南
 
-1. 先验证模式 A（默认抑制，`TURN_KD` 从 0 起调）：目标速度 0 直行，观察串口 `omega_z`——自发偏航越明显则 `TURN_KD` 需越大；调到车体能稳定走直线且不振荡为止；
+1. 先验证模式 A（默认抑制，`TURN_KD` 从 0 起调）：未武装按 `'+'` 设一个非零前进速度 → 武装 → `'w'` 开启运动直行，观察串口 `omega_z`——自发偏航越明显则 `TURN_KD` 需越大；调到车体能稳定走直线且不振荡为止；
 2. 校验差速符号：`'t'` 切入开环模式，发 `'r'`，若车体实际左转则 `'l'`/`'r'` 符号写反，调换 `main.cpp` 中 `'l'`/`'r'` 分支的加减号即可（勿改电机接线）；
 3. 再调模式 B：`'l'`/`'r'` 步进转角，观察转向响应快慢——`TURN_KP` 过小转向迟缓、过大则车体抖动或失衡；`TURN_PWM_LIMIT` 是安全上限，先保守再放开；
 4. 注意开环转角的固有代价（docs 5.5）：`TURN_ANGLE_STEP_DEG` 是"模糊转角"而非精确角度，多步累计会偏，实际转角以 `omega_z` 观测为准。
 
 ## 无线操控（micro-ROS + WiFi）
 
-test12 的串口遥控（`w`/`x` 定速、`l`/`r` 开环转角）受线缆长度与实时性限制。`test13_balance` 在 test12 控制核心基础上引入 micro-ROS 与 WiFi，将指令通道迁移到 ROS2 话题 `/cmd_vel` 与 `/balance_enable`，由上位机 `teleop_twist_keyboard` 键盘遥控，实现真正无绳操控。
+test12 的串口遥控（`'+'`/`'-'` 定速、`w` 启停、`l`/`r` 开环转角）受线缆长度与实时性限制。`test13_balance` 在 test12 控制核心基础上引入 micro-ROS 与 WiFi，将指令通道迁移到 ROS2 话题 `/cmd_vel` 与 `/balance_enable`，由上位机 `teleop_twist_keyboard` 键盘遥控，实现真正无绳操控。
 
 ### 7. 设计
 
@@ -664,7 +664,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ### 速度环整定
 
 - **本质是负反馈**：速度环作为外环，通过倾角调节使 \(v \to v_{set}\) 收敛，是标准的负反馈。以 \(v_{set} > 0\) 起步为例：误差 \(e = v_{set} - v > 0\) 使 \(\mathrm{output} > 0\)，代入后直立环目标角 \(\theta_0 - \mathrm{output} < \theta_0\)，车体**前倾加速**、轮子追上车身；接近目标速度后误差减小、目标角回到中值，车体回正匀速前进——全程收敛。需注意：平衡车调的是**倾角**而非 PWM，故轮速变化表现为"先超调后收敛"，这与"越跑越快直至倾倒"的正反馈发散有本质区别，勿将前者误判为极性反。
-- **Kp 极性**：设 \(v_{set}=0\)，手拨其中一个轮子，速度环应**抑制**它趋于停止；若轮子不减速反而加速、越转越快，则极性错或编码器相位反（正反馈发散特征）。再发 `'w'` 给正 \(v_{set}\)，轮子应稳定在目标速度附近小范围摇摆后收敛（本固件前进时 `speed` 应为正，见 4.4）。
+- **Kp 极性**：设 \(v_{set}=0\)，手拨其中一个轮子，速度环应**抑制**它趋于停止；若轮子不减速反而加速、越转越快，则极性错或编码器相位反（正反馈发散特征）。再按 `'w'` 开启运动（设定正 \(v_{set}\)），轮子应稳定在目标速度附近小范围摇摆后收敛（本固件前进时 `speed` 应为正，见 4.4）。
 - **Kp 大小**：按本文档量纲 `deg/(mm/s)`，从 0.5~1 起步逐档增大（`SPEED_OUTPUT_LIMIT=10°` 时约 10~30 mm/s 误差即饱和）；勿直接照搬社区"从 10 起"（那是按 PWM 或位置环量纲的经验值）。
 - **Ki**：社区经验 \(K_i' \approx K_p'/200\)，用于消静差，无需单独整定。
 - **现象判定**：

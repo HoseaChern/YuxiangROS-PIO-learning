@@ -3,13 +3,13 @@
  * @brief test11_speed: 两轮自平衡串级固件 (阶段二: 速度环 PI + 直立环 PD 串级)
  *
  * 功能: MPU6050 读姿态 + 编码器测速 -> 速度环 PI -> 直立环 PD -> 左右轮同值 PWM;
- *       串口命令: s=启停 / c=标定机械中值 / w=目标速度+10 / x=目标速度-10 / v=显示目标速度。
+ *       串口命令: s=启停 / c=标定机械中值 / +/-=未武装时设定目标速度 / w=运行中运动往返开关。
  *
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 3.3 串级公式):
  *   速度环(外环, PI):  speed_output = Kp'*(v_set - v) + Ki'*Σe_j, 输出为期望角度增量 (deg)
  *   直立环(内环, PD):  PWM = Kp*(target_angle - theta) - Kd*omega
  *   串级嵌套:           target_angle = theta_0 - speed_output
- *   其中 v_set 为期望车体速度 (mm/s, 串口 'w'/'x' 调整), v 为编码器反馈速度 (两轮平均, mm/s)。
+ *   其中 v_set 为期望车体速度 (mm/s, 未武装时串口 '+'/'-' 设定, 运行中按 'w' 使能运动), v 为编码器反馈速度 (两轮平均, mm/s)。
  *
  * 方向约定 (沿用 test10):
  *   小车前进方向为 x 负方向, "前倾"时 getAngleY 读数为负;
@@ -56,7 +56,8 @@ Kinematics kinematics;                            // 运动学对象: 编码器�
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
 float zero_pitch_deg = UPRIGHT_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
-float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, 可由 'w'/'x' 命令调整
+float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, 未武装时由 '+'/'-' 命令设定
+bool motion_enabled = false;                      // 运动使能开关 ('w' 往返切换, 仅运行态有效; 起控/解除/倒地清零)
 
 // ---- 函数前向声明 (内部链接) ----
 
@@ -89,7 +90,8 @@ void setup() {
     delay(UPRIGHT_CALM_DELAY_MS); // 静置等待传感器稳定后再采样
     mpu.calcOffsets();
     Serial.println(
-        "[IMU] calibration done. Commands: s=arm/stop c=calibrate-zero w=+speed x=-speed"
+        "[IMU] calibration done. Commands: s=arm/stop c=calibrate-zero "
+        "+=speed+10 -=speed-10(disarmed only) w=run/stop-motion(running only)"
     );
 
     // 初始化两路编码器
@@ -140,8 +142,8 @@ namespace {
  *   'c' 标定机械中值: 仅停止状态有效, 手扶车体大致直立静止后发送。
  *       随后每个控制周期由本函数逐周期累加 theta, 取 0.2s 均值作为 theta_0,
  *       采样期间小车保持静止, 完成即自动生效并打印结果。
- *   'w'/'x' 目标速度调整: 每按一次按 SPEED_STEP_MM_S 步进加减 (运行中/停止均可)。
- *   'v' 显示当前目标速度与反馈速度。
+ *   '+'/'-' 目标速度设定: 仅未武装有效, 每按一次按 SPEED_STEP_MM_S 步进加减 (负值即后退)。
+ *   'w' 运动往返开关: 仅运行态有效, 开->按设定速度运动, 关->停止运动保持直立平衡。
  *
  * @param theta 当前控制角 theta (deg, 后倾为正), 'c' 标定时用于累加采样
  */
@@ -167,6 +169,9 @@ void handle_serial_command(float theta) {
         case 's':
             // 切换武装标志, 并在串口回显当前状态 (纯文本, 无绘图依赖)
             balance_armed = !balance_armed;
+            if (!balance_armed) {
+                motion_enabled = false; // 解除武装即停止运动, 保证下次起控默认原地直立
+            }
             Serial.println(balance_armed ? "[CMD] armed, wait for pitch window" : "[CMD] stopped");
             break;
 
@@ -182,21 +187,38 @@ void handle_serial_command(float theta) {
             Serial.println("[CALIB] sampling 0.2s, hold the car upright...");
             break;
 
-        case 'w':
-            // 目标速度 +步进
+        case '+':
+            // 目标速度 +步进: 仅未武装有效, 避免运行中误触变速
+            if (balance_armed) {
+                Serial.println("[CMD] ignored: disarmed only");
+                break;
+            }
             target_speed_mm_s += SPEED_STEP_MM_S;
             Serial.printf("[CMD] target speed=%.1f mm/s\n", target_speed_mm_s);
             break;
 
-        case 'x':
-            // 目标速度 -步进
+        case '-':
+            // 目标速度 -步进: 仅未武装有效 (负值即后退)
+            if (balance_armed) {
+                Serial.println("[CMD] ignored: disarmed only");
+                break;
+            }
             target_speed_mm_s -= SPEED_STEP_MM_S;
             Serial.printf("[CMD] target speed=%.1f mm/s\n", target_speed_mm_s);
             break;
 
-        case 'v':
-            // 显示当前目标速度
-            Serial.printf("[CMD] target speed=%.1f mm/s\n", target_speed_mm_s);
+        case 'w':
+            // 运动往返开关: 仅运行态有效, 开->按设定速度运动, 关->停止运动保持直立平衡
+            if (balance_state != BalanceState::kRunning) {
+                Serial.println("[CMD] ignored: arm first (s), then w toggles motion while running");
+                break;
+            }
+            motion_enabled = !motion_enabled;
+            Serial.printf(
+                "[CMD] motion=%s, target speed=%.1f mm/s\n",
+                motion_enabled ? "on" : "off",
+                target_speed_mm_s
+            );
             break;
 
         default:
@@ -247,6 +269,7 @@ void control_step() {
             // 清零两环 PID 内部状态 (误差差分/积分), 避免上次残留
             balance_pid.reset();
             speed_pid.reset();
+            motion_enabled = false; // 起控默认原地直立, 须按 'w' 才运动 (防上次运动残留带入)
             balance_state = BalanceState::kRunning;
             Serial.println("[STATE] running");
         }
@@ -256,6 +279,7 @@ void control_step() {
         // 倒地保护: 姿态超出安全窗口 -> 解除武装并切回停止, 下一周期关闭输出
         if (fabsf(theta - zero_pitch_deg) >= UPRIGHT_FALL_ANGLE_DEG) {
             balance_armed = false;
+            motion_enabled = false; // 倒地即停止运动
             balance_state = BalanceState::kIdle;
             Serial.println("[SAFE] fall detected, disarmed");
             break;
@@ -263,7 +287,9 @@ void control_step() {
 
         // 速度环 (外环, PI): 期望速度 target_speed_mm_s, 反馈两轮平均 speed_mm_s
         // 输出为期望角度增量 (deg): speed_output = Kp'*(v_set - v) + Ki'*Σe
-        const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
+        // 速度环期望: 运动开关关闭时目标为 0 (原地直立), 开启时取设定值
+        const float speed_setpoint = motion_enabled ? target_speed_mm_s : 0.0f;
+        const int16_t speed_output = speed_pid.update_pwm_speed(speed_setpoint, speed_mm_s);
 
         // 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出 (docs 3.3 公式 ③)
         const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
@@ -285,8 +311,9 @@ void control_step() {
     if (now - last_print_ms >= BALANCE_PRINT_MS) {
         last_print_ms = now;
         Serial.printf(
-            "state=%s theta=%.2f omega=%.2f speed=%.1f target=%.1f pwm=%d\n",
+            "state=%s motion=%s theta=%.2f omega=%.2f speed=%.1f target=%.1f pwm=%d\n",
             balance_state == BalanceState::kRunning ? "RUN" : "IDLE",
+            motion_enabled ? "on" : "off",
             theta,
             omega,
             speed_mm_s,

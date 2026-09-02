@@ -159,8 +159,8 @@ constexpr float SPEED_KP = 1.0f;              // 速度环比例增益, 单位 d
 constexpr float SPEED_KI = SPEED_KP * 0.005f; // 速度环积分增益, 经验上为 KP 的 1/200
 constexpr float SPEED_KD = 0.0f;              // 速度环微分增益 (PI 无 D 项, 此处仅占位勿改)
 constexpr float SPEED_OUTPUT_LIMIT = 10.0f;   // 速度环输出限幅 (角度增量, deg), 防目标角过大失衡
-constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s ('w'/'x' 串口调整)
-constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('w' 加 / 'x' 减)
+constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s (未武装时 '+'/'-' 串口设定)
+constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('+' 加 / '-' 减)
 
 // ---- 转向环参数 (test12_turn) ----
 // 转向环为差模量 Δ, 对称叠加进左右轮: pwm_L = base + Δ, pwm_R = base - Δ (docs 5.2)
