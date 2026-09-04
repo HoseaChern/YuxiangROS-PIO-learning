@@ -3,24 +3,24 @@
  * @brief test12_turn: 两轮自平衡转向固件 (阶段三: 转向环差模叠加, 承接 test11 串级)
  *
  * 功能: 在 test11 (速度环 PI + 直立环 PD 串级) 基础上新增转向环, 差速量 Δ 对称叠加进左右轮;
- *       两种转向模式: 抑制转向 (走直线阻尼, 默认) 与 开环转动 (串口 'l'/'r' 步进转角指令)。
+ *       单一完整转向环: Δ = Kp·θ_cmd − Kd·ωz (目标转角由开环指令给出, 无指令为 0)。
  *
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 5.2/5.3):
  *   共模: pwm_base = balance_pwm + speed_pwm (直立环 PD + 速度环 PI 串级, 同 test11)
- *   差模: Δ = 转向环输出 (模式 A 抑制 / 模式 B 开环), 合成 pwm_L = base + Δ, pwm_R = base - Δ
- *   模式 A 抑制转向: Δ = -TURN_KD*ωz, 复用 update_pwm (target=0, kp 装 TURN_KD), ωz = Gyro_Z
- *   模式 B 开环转动: Δ = TURN_KP*θ_target, 用 update_pwm_turn_openloop (docs 5.3 模式 B)
+ *   差模: Δ = 单一转向环输出 (docs 5.3), 合成 pwm_L = base + Δ, pwm_R = base - Δ
+ *   指令项: Δ 指令 = Kp·θ_cmd, θ_cmd 由串口 'l'/'r' 步进 ('o' 归零), 无指令 = 0;
+ *   阻尼项: Δ 阻尼 = −Kd·ωz, 无指令时单独作用 = 走直线抑制
  *
  * 方向约定 (沿用 test10/test11):
  *   前进方向为 -X, "前倾"时 getAngleY 为负; 直接采用传感器原始读数: theta = getAngleY(),
  *   omega_pitch = getGyroY(), omega_z = getGyroZ() (后倾为正)。
  *   转向差速符号 (docs 5.2): pwm_L = base + Δ 且 Δ>0 → 左轮快 → 右转 (顺时针);
- *   故左转指令取负、右转取正; 实测反向时调换 'l'/'r' 符号即可。模式 A 符号自洽:
- *   车左转时 ωz>0, Δ = -TURN_KD*ωz < 0 → 右轮快 → 反向阻尼, 无需额外取负。
+ *   故左转指令取负、右转取正; 实测反向时调换 'l'/'r' 符号即可。阻尼项符号自洽:
+ *   车左转时 ωz>0, Δ 阻尼 = −Kd·ωz < 0 → 右轮快 → 反向阻尼, 无需额外取负。
  *   正 PWM 驱动两轮向车头(前进)方向转动; 若实测反向应反接电机而非取负。
  *
  * 串口命令: s=启停 / c=标定机械中值 / +=设定速度+ / -=设定速度- / w=运动往返开关
- *          / t=切换转向模式 / l=左转步进 / r=右转步进 / o=开环转角归零。
+ *          / l=左转步进 / r=右转步进 / o=目标转角归零。
  * 详细设计 / 调参指南见 docs/Balance_Car_Notes.md 6。编译: pio run -e test12_turn -t upload
  */
 
@@ -44,12 +44,7 @@ namespace {
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
-    kRunning, // 直立控制: 速度环 + 直立环串级 + 转向环差模叠加输出
-};
-
-enum class TurnMode : uint8_t {
-    kStraight,     // 抑制转向 (走直线): Δ = -TURN_KD*ωz, 阻尼自发偏航 (docs 5.3 模式 A)
-    kOpenloopTurn, // 开环转动: Δ = TURN_KP*θ_target, 跟踪串口转角指令 (docs 5.3 模式 B)
+    kRunning, // 直立控制: 速度环 + 直立环串级 + 单一转向环差模叠加输出
 };
 
 // ---- 可变全局状态 (仅在 balance_task 中读写, 无跨任务竞争) ----
@@ -59,20 +54,18 @@ Esp32PcntEncoder encoders[2]; // 编码器对象数组 (两轮)
 MPU6050 mpu(Wire);            // MPU6050 对象, 使用 Wire 作为 I2C 总线
 PIDController speed_pid;      // 速度环 PI 控制器 (外环, 参数在 setup 中配置)
 PIDController balance_pid;    // 直立环 PD 控制器 (内环, 参数在 setup 中配置)
-PIDController turn_pid;       // 转向环控制器 (差模, 参数随模式在 setup/'t' 中配置)
+PIDController turn_pid;       // 转向环控制器 (差模单一完整转向环, 参数在 setup 中配置)
 Kinematics kinematics;        // 运动学对象: 编码器测速 + 正解
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
 float zero_pitch_deg = UPRIGHT_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
 float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, 未武装时由 '+'/'-' 命令设定
-bool motion_enabled = false;                      // 运动使能开关 ('w' 往返切换, 仅运行态有效; 起控/解除/倒地清零)
-TurnMode turn_mode = TurnMode::kStraight;         // 当前转向模式, 可由 't' 命令切换
-float turn_target_angle_deg = 0.0f;               // 开环期望转角 θ_target, 'l'/'r' 步进 ('o' 归零)
+bool motion_enabled = false;        // 运动使能开关 ('w' 往返切换, 仅运行态有效; 起控/解除/倒地清零)
+float turn_target_angle_deg = 0.0f; // 开环目标转角 θ_cmd, 'l'/'r' 步进 ('o' 归零), 无指令保持 0
 
 // ---- 函数前向声明 (内部链接) ----
 
 void handle_serial_command(float theta);
-void configure_turn_pid();
 void control_step();
 void balance_task(void* param);
 
@@ -103,7 +96,7 @@ void setup() {
     Serial.println(
         "[IMU] calibration done. Commands: s=arm/stop c=calibrate-zero "
         "+=speed+10 -=speed-10(disarmed only) w=run/stop-motion(running only) "
-        "t=switch-turn-mode l=left-turn r=right-turn o=zero-turn"
+        "l=left-turn r=right-turn o=zero-turn"
     );
 
     // 初始化两路编码器
@@ -126,8 +119,10 @@ void setup() {
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
-    // 配置转向环 (差模): 默认抑制模式, Δ 经 update_pwm 以 target=0 复用 (docs 5.3 模式 A)
-    configure_turn_pid();
+    // 配置单一完整转向环 (差模, docs 5.3): Δ = Kp·θ_cmd − Kd·ωz
+    // 单一三元组 TURN_KP/TURN_KI/TURN_KD, KI 恒 0 占位; 指令项与阻尼项一次调用完成, 无模式切换
+    turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD);
+    turn_pid.output_limit(TURN_PWM_LIMIT);
 
     // 创建控制任务: 5ms 固定节拍, 钉在 core1 避开 core0 的 WiFi 协议栈抖动
     xTaskCreatePinnedToCore(
@@ -148,25 +143,6 @@ void loop() {
 namespace {
 
 /**
- * @brief 按当前转向模式配置转向环 PID (增益与输出限幅, 切换模式时先 reset 清状态)
- *
- * 模式 A (kStraight): kp 装 TURN_KD, ki=kd=0, target 固定 0, 用 update_pwm 得 Δ = -TURN_KD*ωz
- *   (抑制转向复用通用 update_pwm, 未新增方法, 见 lib/PIDController docs/README.md);
- * 模式 B (kOpenloopTurn): kp 装 TURN_KP, ki=kd=0, 用 update_pwm_turn_openloop 得 Δ = TURN_KP*θ_target。
- * 输出限幅均为 TURN_PWM_LIMIT, 防止差速量过大超出直立环调节能力破坏平衡 (docs 5.5)。
- */
-void configure_turn_pid() {
-    turn_pid.reset(); // 切换模式时清零内部状态, 避免模式 A 残留的误差差分/积分污染模式 B
-    if (turn_mode == TurnMode::kOpenloopTurn) {
-        turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD_DISABLED);
-    } else {
-        turn_pid.update_pid(TURN_KD, TURN_KI, TURN_KD_DISABLED);
-        turn_pid.update_target(0.0f); // 抑制转向: 期望角速度恒为 0
-    }
-    turn_pid.output_limit(TURN_PWM_LIMIT);
-}
-
-/**
  * @brief 处理串口单字符命令 + 机械中值在线标定采样 (每控制周期轮询一次)
  *
  * 命令表:
@@ -176,10 +152,9 @@ void configure_turn_pid() {
  *       采样期间小车保持静止, 完成即自动生效并打印结果。
  *   '+'/'-' 目标速度设定: 仅未武装有效, 每按一次按 SPEED_STEP_MM_S 步进加减 (负值即后退)。
  *   'w' 运动往返开关: 仅运行态有效, 开->按设定速度运动, 关->停止运动保持直立平衡。
- *   't' 切换转向模式 (抑制 <-> 开环): 切换时重配 turn_pid 增益并清零目标转角 (docs 5.3 A/B)。
- *   'l'/'r' 开环转角步进: 仅开环模式有效, 每按一次 turn_target_angle_deg 增减 TURN_ANGLE_STEP_DEG;
+ *   'l'/'r' 目标转角步进: 每按一次 turn_target_angle_deg 增减 TURN_ANGLE_STEP_DEG;
  *       符号约定: Δ>0 → 右转 (见文件头方向约定), 故 'l' 左转取负、'r' 右转取正, 实测反向时调换。
- *   'o' 开环转角归零: 目标转角回 0 (两种模式均可用, 开环模式下即恢复直行)。
+ *   'o' 目标转角归零: turn_target_angle_deg 回 0 (docs 5.3 无指令 = 0, 转向环仅剩阻尼项走直线)。
  *
  * @param theta 当前控制角 theta (deg, 后倾为正), 'c' 标定时用于累加采样
  */
@@ -257,42 +232,21 @@ void handle_serial_command(float theta) {
             );
             break;
 
-        case 't':
-            // 切换转向模式: 抑制(走直线) <-> 开环转动; 重配增益并清零目标转角
-            turn_mode =
-                (turn_mode == TurnMode::kStraight) ? TurnMode::kOpenloopTurn : TurnMode::kStraight;
-            turn_target_angle_deg = 0.0f; // 模式切换后目标转角归零, 避免遗留转角指令
-            configure_turn_pid();
-            Serial.printf(
-                "[CMD] turn mode=%s, target_angle=%.1f deg\n",
-                turn_mode == TurnMode::kStraight ? "straight" : "openloop",
-                turn_target_angle_deg
-            );
-            break;
-
         case 'l':
-            // 左转步进: 仅开环模式有效 (抑制模式无转角指令概念)
-            if (turn_mode != TurnMode::kOpenloopTurn) {
-                Serial.println("[CMD] ignored: turn mode is straight");
-                break;
-            }
-            // Δ>0 → 左轮快 → 右转 (docs 5.2), 故左转目标转角取负 (实测反向时调换 'l'/'r')
+            // 左转步进: 单一转向环指令项, 无模式限制; Δ>0 → 左轮快 → 右转 (docs 5.2),
+            // 故左转目标转角取负 (实测反向时调换 'l'/'r')
             turn_target_angle_deg -= TURN_ANGLE_STEP_DEG;
             Serial.printf("[CMD] turn target=%.1f deg\n", turn_target_angle_deg);
             break;
 
         case 'r':
-            // 右转步进: 仅开环模式有效
-            if (turn_mode != TurnMode::kOpenloopTurn) {
-                Serial.println("[CMD] ignored: turn mode is straight");
-                break;
-            }
+            // 右转步进: 目标转角 +步进
             turn_target_angle_deg += TURN_ANGLE_STEP_DEG;
             Serial.printf("[CMD] turn target=%.1f deg\n", turn_target_angle_deg);
             break;
 
         case 'o':
-            // 开环转角归零: 恢复直行
+            // 目标转角归零 (docs 5.3 无指令 = 0): 转向环仅剩阻尼项, 恢复直行
             turn_target_angle_deg = 0.0f;
             Serial.println("[CMD] turn target=0 deg");
             break;
@@ -317,7 +271,7 @@ void control_step() {
     mpu.update();
     const float theta = mpu.getAngleY();      // theta: 控制俯仰角 (deg), 后倾为正
     const float omega_pitch = mpu.getGyroY(); // omega_pitch: 控制俯仰角速度 (deg/s), 后倾方向为正
-    const float omega_z = mpu.getGyroZ();      // omega_z: 偏航角速度 (deg/s), 用作转向环反馈/阻尼
+    const float omega_z = mpu.getGyroZ();     // omega_z: 偏航角速度 (deg/s), 用作转向环反馈/阻尼
 
     // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈
     int32_t ticks[2] = {encoders[MOTOR_LEFT].getTicks(), encoders[MOTOR_RIGHT].getTicks()};
@@ -380,14 +334,10 @@ void control_step() {
         const float inputs[2] = {theta, omega_pitch}; // [角度, 角速度]
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
-        // 6. 差模部分: 转向环输出 Δ (docs 5.3)
-        if (turn_mode == TurnMode::kOpenloopTurn) {
-            // 模式 B 开环转动: Δ = TURN_KP*θ_target (无反馈, 开环转角指令)
-            pwm_delta = turn_pid.update_pwm_turn_openloop(turn_target_angle_deg);
-        } else {
-            // 模式 A 抑制转向: Δ = -TURN_KD*ωz (target=0 的角速度比例跟踪, 阻尼自发偏航)
-            pwm_delta = turn_pid.update_pwm(omega_z);
-        }
+        // 6. 差模部分: 单一完整转向环输出 Δ (docs 5.3)
+        // Δ = Kp*θ_cmd − Kd*ωz: 指令项驱动开环目标转角 (无指令 θ_cmd=0 时不起作用),
+        // 阻尼项 −Kd*ωz 独立抑制自发偏航 (θ_cmd=0 时即走直线阻尼)
+        pwm_delta = turn_pid.update_pwm_turn(turn_target_angle_deg, omega_z);
 
         // 7. 合成: 共模 base + 差模 Δ 对称叠加 (docs 5.2)
         // 在 int 域求和避免 int16 整数提升的隐式窄化告警; 两环输出均独立限幅
@@ -408,7 +358,7 @@ void control_step() {
         last_print_ms = now_ms;
         Serial.printf(
             "state=%s motion=%s theta=%.2f omega=%.2f omega_z=%.2f speed=%.1f target=%.1f "
-            "turn=%s turn_cmd=%.1f delta=%d pwm_L=%d pwm_R=%d\n",
+            "turn_cmd=%.1f delta=%d pwm_L=%d pwm_R=%d\n",
             balance_state == BalanceState::kIdle ? "idle" : "run",
             motion_enabled ? "on" : "off",
             theta,
@@ -416,7 +366,6 @@ void control_step() {
             omega_z,
             speed_mm_s,
             target_speed_mm_s,
-            turn_mode == TurnMode::kStraight ? "straight" : "openloop",
             turn_target_angle_deg,
             pwm_delta,
             pwm_left,

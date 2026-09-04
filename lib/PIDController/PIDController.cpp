@@ -84,20 +84,23 @@ int16_t PIDController::update_pwm_speed(float target, float measurement) {
 }
 
 /**
- * @brief 更新转向环 PID 控制器（开环转动变体）
+ * @brief 更新转向环 PID 控制器（单一完整转向环）
  *
- * 数学形式 u = kp·target，与文档转向环 5.3 模式 B「期望转向-开环」公式 Δ = Kp·θ_target 对应。
+ * 数学形式 u = kp·θ_cmd − kd·ωz，与文档转向环 5.3 公式 Δ = Kp·θ_cmd − Kd·ωz 对应。
  * 为什么:
- *   开环: 期望转角为外部指令（遥控/上位机的模糊转角），无 yaw 反馈（docs 5.4: 六轴无绝对航向）;
+ *   指令项 kp·θ_cmd: 目标转角为开环指令（遥控/上位机的模糊转角），无 yaw 反馈
+ *      （docs 5.4: 六轴无绝对航向），θ_cmd=0（无指令）时该项不起作用;
+ *   阻尼项 −kd·ωz: 纯 D 角速度阻尼，θ_cmd=0 时单独作用 = 走直线抑制（docs 5.3）;
  *   无积分: 转向存在偏航偏移与车轮滑动误差，"消静差"收益甚微反而引入漂移（docs 5.3）;
- *   无微分: 抑制转向（模式 A，纯 D 阻尼 Δ = -kd·ωz）复用 update_pwm（target=0）实现，本方法只管开环映射。
+ *   无微分槽: 角速度阻尼即 D 项，经 kd 直乘，无需误差差分。
  *   注意: 本方法不读不写 error_sum_/d_error_/error_last_，reset() 对其无影响。
  *
- * @param target 期望转角 θ_target（deg，开环外部指令）
+ * @param target_cmd 目标转角 θ_cmd（deg，开环外部指令，无指令=0）
+ * @param omega_z 当前偏航角速度 ωz（deg/s，Gyro_Z 反馈）
  * @return PWM 输出（差速量 Δ），四舍五入取整，范围 ±output_limit_
  */
-int16_t PIDController::update_pwm_turn_openloop(float target) {
-    float output = kp_ * target;                                          // 开环: Δ = kp·θ_target
+int16_t PIDController::update_pwm_turn(float target_cmd, float omega_z) {
+    float output = kp_ * target_cmd - kd_ * omega_z; // 单一完整转向环: Δ = kp·θ_cmd − kd·ωz
     output = std::fmax(-output_limit_, std::fmin(output_limit_, output)); // 输出限幅
 
     return static_cast<int16_t>(output >= 0.0f ? output + 0.5f : output - 0.5f);

@@ -2,11 +2,13 @@
  * @file main.cpp
  * @brief test13_balance: 两轮自平衡无线操控固件 (micro-ROS + WiFi 键盘遥控)
  *
- * 在 test12 (速度环 PI + 直立环 PD 串级 + 转向环差模叠加) 基础上引入 micro-ROS 与 WiFi,
+ * 在 test12 (速度环 PI + 直立环 PD 串级 + 单一转向环差模叠加) 基础上引入 micro-ROS 与 WiFi,
  * 由上位机 teleop_twist_keyboard 通过 /cmd_vel 键盘遥控; 武装/解除由 /balance_enable
- * 话题控制, Agent 会话断开自动解除武装。转向环统一为偏航角速度伺服 (无模式 B 开环转角)。
+ * 话题控制, Agent 会话断开自动解除武装。转向环与 test12 共用单一完整转向环
+ * (Δ = Kp·θ_cmd − Kd·ωz), 差异仅在目标转角 θ_cmd 来源: /cmd_vel angular.z 角速度指令
+ * 折算为目标转角 (无指令 ωz,set=0 时 θ_cmd=0, 仅剩阻尼项走直线)。
  *
- * 详细说明见 docs/Balance_Car_Notes.md: 命令通道/限幅 7.1, 转向伺服 7.2,
+ * 详细说明见 docs/Balance_Car_Notes.md: 命令通道/限幅 7.1, 转向控制 7.2,
  * 并发模型/安全 7.3, 方向约定 1.6/5.2, 上位机操作步骤 8.3。
  *
  * 编译: pio run -e test13_balance -t upload
@@ -49,7 +51,7 @@ constexpr uint32_t AGENT_RECONNECT_MS = 1000; // Agent 会话断开后的重连�
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
-    kRunning, // 直立控制: 速度环 + 直立环串级 + 偏航角速度伺服差模输出
+    kRunning, // 直立控制: 速度环 + 直立环串级 + 单一转向环差模输出
 };
 
 // ---- 可变全局状态 (仅在 balance_task 中读写, 无跨任务竞争) ----
@@ -59,7 +61,7 @@ Esp32PcntEncoder encoders[2]; // 编码器对象数组 (两轮)
 MPU6050 mpu(Wire);            // MPU6050 对象, 使用 Wire 作为 I2C 总线
 PIDController speed_pid;      // 速度环 PI 控制器 (外环, 参数在 setup 中配置)
 PIDController balance_pid;    // 直立环 PD 控制器 (内环, 参数在 setup 中配置)
-PIDController turn_pid;       // 转向环控制器 (差模角速度伺服, 参数在 setup 中配置)
+PIDController turn_pid;       // 转向环控制器 (差模单一完整转向环, 参数在 setup 中配置)
 Kinematics kinematics;        // 运动学对象: 编码器测速 + 正解
 BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 (cmd_enable 同步而来, 倒地自动解除)
@@ -130,8 +132,9 @@ void setup() {
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
-    // 配置转向环 (差模角速度伺服): kp 装 TURN_KD, target 每周期由 ωz_set 驱动 (docs 7.2)
-    turn_pid.update_pid(TURN_KD, TURN_KI, TURN_KD_DISABLED);
+    // 配置单一完整转向环 (差模, docs 5.3/7.2): Δ = Kp·θ_cmd − Kd·ωz
+    // 与 test12 共用 TURN_KP/TURN_KI/TURN_KD 三元组 (KI 恒 0 占位), 无模式切换
+    turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD);
     turn_pid.output_limit(TURN_PWM_LIMIT);
 
     // 创建控制任务: 5ms 固定节拍, 钉在 core1 避开 core0 的 WiFi 协议栈抖动
@@ -256,7 +259,7 @@ void control_step() {
     mpu.update();
     const float theta = mpu.getAngleY();      // 控制角 (deg): 后倾为正
     const float omega_pitch = mpu.getGyroY(); // 俯仰角速度 (deg/s): 后倾为正
-    const float omega_z = mpu.getGyroZ();      // 偏航角速度 (deg/s): 左转为正
+    const float omega_z = mpu.getGyroZ();     // 偏航角速度 (deg/s): 左转为正
 
     // 2. 编码器测速 + 运动学正解: 车体前进速度 v (mm/s), 用作速度环反馈
     int32_t ticks[2] = {encoders[MOTOR_LEFT].getTicks(), encoders[MOTOR_RIGHT].getTicks()};
@@ -338,10 +341,11 @@ void control_step() {
         const float inputs[2] = {theta, omega_pitch};
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
-        // 转向环 (偏航角速度伺服, docs 7.2): 每周期刷新 target 为 ωz_set,
-        // ωz_set=0 时退化为 test12 模式 A 走直线阻尼
-        turn_pid.update_target(omega_z_target);
-        pwm_delta = turn_pid.update_pwm(omega_z);
+        // 转向环 (单一完整转向环, docs 7.2): 遥控角速度指令折算为目标转角指令
+        // θ_cmd = (Kd/Kp)·ωz_set (折算系数量纲 deg/(deg/s)=s, 见 docs 7.2 公式),
+        // 无指令 (teleop 松键发全零, ωz_set=0) 时 θ_cmd=0, 转向环仅剩阻尼项走直线
+        const float turn_cmd_deg = (TURN_KD / TURN_KP) * omega_z_target;
+        pwm_delta = turn_pid.update_pwm_turn(turn_cmd_deg, omega_z);
 
         // 差模合成 (int 域求和, 避免窄化隐式告警): pwm_L = base + Δ, pwm_R = base - Δ
         pwm_left = static_cast<int16_t>(static_cast<int>(pwm_balance) + pwm_delta);

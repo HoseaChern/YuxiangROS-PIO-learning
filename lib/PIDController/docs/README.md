@@ -129,16 +129,16 @@ PID 三项不必然全部使用。例如小车直立平衡为追求快速响应�
 
 ### 2.3 公共接口
 
-| 方法                                    | 说明                                                                                 |
-| --------------------------------------- | ------------------------------------------------------------------------------------ |
-| `update_pid(kp, ki, kd)`                | 设定 $P/I/D$ 增益，不重置内部状态                                                    |
-| `output_limit(limit)`                   | 设定对称输出限幅 ±limit                                                              |
-| `update_target(target)`                 | 设定目标值（数值微分变体用）                                                         |
-| `update_pwm(current)`                   | 数值微分变体：$D$ 项 $\Delta e$ 取误差差分 $e_k - e_{k-1}$                           |
-| `update_pwm_upright(target, inputs)`    | 直立环变体：纯 PD，外部微分，$\Delta e$ 取角速度的相反数 $-\omega$；目标角度直接入参 |
-| `update_pwm_speed(target, measurement)` | 速度环变体：纯 PI，$u = K_p e + K_i' \sum e$                                         |
-| `update_pwm_turn_openloop(target)`      | 转向环变体（开环转动）：纯比例，$u = K_p \cdot \theta_{target}$；无反馈/积分/微分    |
-| `reset()`                               | 清零内部状态，重新起控前调用                                                         |
+| 方法                                    | 说明                                                                                                                                                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `update_pid(kp, ki, kd)`                | 设定 $P/I/D$ 增益，不重置内部状态                                                                                                                                                                  |
+| `output_limit(limit)`                   | 设定对称输出限幅 ±limit                                                                                                                                                                            |
+| `update_target(target)`                 | 设定目标值（数值微分变体用）                                                                                                                                                                       |
+| `update_pwm(current)`                   | 数值微分变体：$D$ 项 $\Delta e$ 取误差差分 $e_k - e_{k-1}$                                                                                                                                         |
+| `update_pwm_upright(target, inputs)`    | 直立环变体：纯 PD，外部微分，$\Delta e$ 取角速度的相反数 $-\omega$；目标角度直接入参                                                                                                               |
+| `update_pwm_speed(target, measurement)` | 速度环变体：纯 PI，$u = K_p e + K_i' \sum e$                                                                                                                                                       |
+| `update_pwm_turn(target_cmd, omega_z)`  | 转向环变体（单一完整转向环）：$u = K_p \cdot \theta_{cmd} - K_d \cdot \omega_z$；指令项 + 角速度阻尼项（纯 D），无积分，无模式切换。无指令时传 $\theta_{cmd}=0$ 即退化为走直线阻尼 $-K_d \omega_z$ |
+| `reset()`                               | 清零内部状态，重新起控前调用                                                                                                                                                                       |
 
 ### 2.4 使用示例
 
