@@ -5,7 +5,7 @@
  * 在 test12 (速度环 PI + 直立环 PD 串级 + 单一转向环差模叠加) 基础上引入 micro-ROS 与 WiFi,
  * 由上位机 teleop_twist_keyboard 通过 /cmd_vel 键盘遥控; 武装/解除由 /balance_enable
  * 话题控制, Agent 会话断开自动解除武装。转向环与 test12 共用单一完整转向环
- * (Δ = Kp·θ_cmd − Kd·ωz), 差异仅在目标转角 θ_cmd 来源: /cmd_vel angular.z 角速度指令
+ * (Δ = Kp·θ_cmd + Kd·ωz), 差异仅在目标转角 θ_cmd 来源: /cmd_vel angular.z 角速度指令
  * 折算为目标转角 (无指令 ωz,set=0 时 θ_cmd=0, 仅剩阻尼项走直线)。
  *
  * 详细说明见 docs/Balance_Car_Notes.md: 命令通道/限幅 7.1, 转向控制 7.2,
@@ -132,7 +132,6 @@ void setup() {
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
-    // 配置单一完整转向环 (差模, docs 5.3/7.2): Δ = Kp·θ_cmd − Kd·ωz
     // 与 test12 共用 TURN_KP/TURN_KI/TURN_KD 三元组 (KI 恒 0 占位), 无模式切换
     turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD);
     turn_pid.output_limit(TURN_PWM_LIMIT);
@@ -342,9 +341,9 @@ void control_step() {
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
         // 转向环 (单一完整转向环, docs 7.2): 遥控角速度指令折算为目标转角指令
-        // θ_cmd = (Kd/Kp)·ωz_set (折算系数量纲 deg/(deg/s)=s, 见 docs 7.2 公式),
+        // θ_cmd = -(Kd/Kp)·ωz_set (折算系数量纲 deg/(deg/s)=s, 见 docs 7.2 公式;
         // 无指令 (teleop 松键发全零, ωz_set=0) 时 θ_cmd=0, 转向环仅剩阻尼项走直线
-        const float turn_cmd_deg = (TURN_KD / TURN_KP) * omega_z_target;
+        const float turn_cmd_deg = -(TURN_KD / TURN_KP) * omega_z_target;
         pwm_delta = turn_pid.update_pwm_turn(turn_cmd_deg, omega_z);
 
         // 差模合成 (int 域求和, 避免窄化隐式告警): pwm_L = base + Δ, pwm_R = base - Δ

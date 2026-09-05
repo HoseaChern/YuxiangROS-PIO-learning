@@ -3,21 +3,20 @@
  * @brief test12_turn: 两轮自平衡转向固件 (阶段三: 转向环差模叠加, 承接 test11 串级)
  *
  * 功能: 在 test11 (速度环 PI + 直立环 PD 串级) 基础上新增转向环, 差速量 Δ 对称叠加进左右轮;
- *       单一完整转向环: Δ = Kp·θ_cmd − Kd·ωz (目标转角由开环指令给出, 无指令为 0)。
+ *       单一完整转向环: Δ = Kp·θ_cmd + Kd·ωz (目标转角由开环指令给出, 无指令为 0)。
  *
  * 控制原理 (严格对应 docs/Balance_Car_Notes.md 5.2/5.3):
  *   共模: pwm_base = balance_pwm + speed_pwm (直立环 PD + 速度环 PI 串级, 同 test11)
  *   差模: Δ = 单一转向环输出 (docs 5.3), 合成 pwm_L = base + Δ, pwm_R = base - Δ
  *   指令项: Δ 指令 = Kp·θ_cmd, θ_cmd 由串口 'l'/'r' 步进 ('o' 归零), 无指令 = 0;
- *   阻尼项: Δ 阻尼 = −Kd·ωz, 无指令时单独作用 = 走直线抑制
+ *   阻尼项: Δ 阻尼 = +Kd·ωz, 无指令时单独作用 = 走直线抑制
  *
  * 方向约定 (沿用 test10/test11):
  *   前进方向为 -X, "前倾"时 getAngleY 为负; 直接采用传感器原始读数: theta = getAngleY(),
  *   omega_pitch = getGyroY(), omega_z = getGyroZ() (后倾为正)。
  *   转向差速符号 (docs 5.2): pwm_L = base + Δ 且 Δ>0 → 左轮快 → 右转 (顺时针);
  *   故左转指令取负、右转取正; 实测反向时调换 'l'/'r' 符号即可。阻尼项符号自洽:
- *   车左转时 ωz>0, Δ 阻尼 = −Kd·ωz < 0 → 右轮快 → 反向阻尼, 无需额外取负。
- *   正 PWM 驱动两轮向车头(前进)方向转动; 若实测反向应反接电机而非取负。
+ *   车左转时 ωz>0, Δ 阻尼 = +Kd·ωz > 0 → 左轮快 → 反向阻尼 (右转), 无需额外取负。
  *
  * 串口命令: s=启停 / c=标定机械中值 / +=设定速度+ / -=设定速度- / w=运动往返开关
  *          / l=左转步进 / r=右转步进 / o=目标转角归零。
@@ -119,7 +118,6 @@ void setup() {
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
-    // 配置单一完整转向环 (差模, docs 5.3): Δ = Kp·θ_cmd − Kd·ωz
     // 单一三元组 TURN_KP/TURN_KI/TURN_KD, KI 恒 0 占位; 指令项与阻尼项一次调用完成, 无模式切换
     turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD);
     turn_pid.output_limit(TURN_PWM_LIMIT);
@@ -335,8 +333,8 @@ void control_step() {
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
         // 6. 差模部分: 单一完整转向环输出 Δ (docs 5.3)
-        // Δ = Kp*θ_cmd − Kd*ωz: 指令项驱动开环目标转角 (无指令 θ_cmd=0 时不起作用),
-        // 阻尼项 −Kd*ωz 独立抑制自发偏航 (θ_cmd=0 时即走直线阻尼)
+        // Δ = Kp*θ_cmd + Kd*ωz: 指令项驱动开环目标转角 (无指令 θ_cmd=0 时不起作用),
+        // 阻尼项 +Kd*ωz 独立抑制自发偏航 (θ_cmd=0 时即走直线阻尼)
         pwm_delta = turn_pid.update_pwm_turn(turn_target_angle_deg, omega_z);
 
         // 7. 合成: 共模 base + 差模 Δ 对称叠加 (docs 5.2)

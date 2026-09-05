@@ -163,13 +163,10 @@ constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s
 constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('+' 加 / '-' 减)
 
 // ---- 转向环参数 (test12_turn / test13_balance) ----
-// 转向环为差模量 Δ, 对称叠加进左右轮: pwm_L = base + Δ, pwm_R = base - Δ (docs 5.2)
-// 单一完整转向环 Δ = Kp·θ_cmd − Kd·ωz (docs 5.3), 一组完整 P/I/D 三元组, 未用项以 0 占位,
-// 命名风格与速度环 SPEED_KP/SPEED_KI/SPEED_KD 一致:
-//   KP 指令项: 驱动开环目标转角 θ_cmd (无指令=0); KD 阻尼项: −Kd·ωz 纯 D, 无指令时单独作用 = 走直线阻尼
-constexpr float TURN_KP = 0.2f; // 指令项增益(开环转角驱动), 单位 PWM/deg (经验起点, 待实测整定)
-constexpr float TURN_KI = 0.0f; // 积分增益 (无 I 项, 占位勿改)
-constexpr float TURN_KD = 0.2f; // 阻尼项增益(角速度阻尼), 单位 PWM/(deg/s) (经验起点, 待实测整定)
+// 指令项增益(开环转角驱动), 单位 PWM/deg (0.5 起步: 低于此单步差速<死区, 轮子不转)
+constexpr float TURN_KP = 0.75f;
+constexpr float TURN_KI = 0.0f;              // 积分增益 (无 I 项, 占位勿改)
+constexpr float TURN_KD = 0.2f;              // 阻尼项增益(角速度阻尼), 单位 PWM/(deg/s)
 constexpr float TURN_PWM_LIMIT = 60.0f;      // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
 constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 deg ('l'/'r' 每次步进)
 
