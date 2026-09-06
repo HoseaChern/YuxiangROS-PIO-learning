@@ -251,6 +251,12 @@ pio run -e test01_motor -t upload
 
 5. inspect odometry: `ros2 topic echo /odom`
 
+For WiFi LAN setup — the evolution across a regular router, a phone hotspot, and
+the PC wireless-card hotspot (current solution), the per-layer theory (2.4/5 GHz
+bands, 802.11 layer-2 isolation, IP subnet, UDP/TCP), the common `nmcli` commands,
+and a layer-by-layer troubleshooting quick reference — see
+[docs/Network_Setup_Notes.md](docs/Network_Setup_Notes.md).
+
 ## Lidar Radar Passthrough (a different path from the book)
 
 Chapter 9 of the book uses a separate adapter board (fishros
