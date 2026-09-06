@@ -76,6 +76,7 @@
       - [记录 3：平放一直前进](#记录-3平放一直前进)
       - [记录 4：速度环限幅饱和致速度打满（Kp 与限幅失配）](#记录-4速度环限幅饱和致速度打满kp-与限幅失配)
       - [记录 5：转向环阻尼项符号反（正反馈发散）](#记录-5转向环阻尼项符号反正反馈发散)
+      - [记录 6：micro-ROS 下行指令收不到（executor spin 超时单位笔误）](#记录-6micro-ros-下行指令收不到executor-spin-超时单位笔误)
     - [安全提示](#安全提示)
 
 在鱼香 ROS 差速底盘（`fishbot_motion_control`）基础上加装 MPU6050，拆下从动轮，整车退化为一级倒立摆，通过电机闭环控制实现两轮自平衡。
@@ -1143,6 +1144,23 @@ $$\Delta = K_p\theta_{cmd} + K_d\omega_z,\qquad \text{稳态 } \Delta=0\Rightarr
 4. 符号修好后，稳态 $\omega_z=(K_p/K_d)\cdot30°$，`Kp=0.75`、`Kd=0.2` 时约 112°/s 仍偏快，建议后续同步增大 `TURN_KD`（0.4~0.6）把稳态转速压到 40~60°/s。
 
 **判别实验** （区分"正反馈"与"Kp 过大"）：手扶车体，观察 $\omega_z$ 是否随转向 **单调发散** ——若 $\omega_z$ 持续单向增大至翻车（而非围绕某值振荡），即阻尼项正反馈；若 $\omega_z$ 围绕目标转速高频振荡，则是 Kp 过大/阻尼不足（调小 Kp 或加大 Kd）。两者最直观区别：正反馈是 **单调爬升** ，Kp 过大是 **振荡** 。
+
+#### 记录 6：micro-ROS 下行指令收不到（executor spin 超时单位笔误）
+
+**现象** ：Agent 会话已建立（`session established`、`create_datareader`×2），主机侧 `ros2 topic pub` 持续发布 `/balance_enable`（含 best_effort QoS）无报错，发布期间 `ros2 topic info` 亦可见固件订阅端点，但串口始终不出现 `[CMD] arm requested`——下行数据未到达 `enable_callback`。
+
+**结论先行** ：QoS（best_effort/volatile）、WiFi、Agent 会话、上位机发布链路全部正常；根因是固件侧 `rclc_executor_spin_some(&executor, 10)` 的超时参数 **单位错误** ——第二个参数是纳秒（`timeout_ns`），`10` 即 10 纳秒。
+
+**机理** ：`spin_some` 的 timeout 逐层传入 `rmw_wait`，在 `rmw_wait.c` 中 `timeout.i32 = rmw_time_total_nsec(wait_timeout) / 1000000ULL`——10 ns / 1 ms = **0 毫秒**。micro-ROS UDP 的数据接收、session 维护、XRCE 消息组装全部发生在 `uxr_run_session_until_data(session, timeout)` 的等待窗口内，timeout = 0 ms 意味着每次 spin **立即返回、来不及从 UDP 读入 Agent 推送的数据**，回调永不触发。
+
+**为何缺失 `[CMD]` 却无任何串口报错** ：`_rclc_default_scheduling` 初始化 `rc = RCL_RET_OK`，且 rmw_wait 的返回码在 spin_some 内被 `RCLC_UNUSED` 丢弃，timeout 时 spin_some 仍返回 OK，故 `if (rc != RCL_RET_OK)` 的"agent session lost"分支永不误触发——数据收不到时固件静默，只能靠回调打印观察。
+
+**判别实验** ：
+
+1. 对比已验证可用的 `test08_Publisher`（阻塞式 `rclc_executor_spin`，内部默认 100 ms 超时）能正常收发，而 `test13` 用 `spin_some(10)` 收不到——差异锁定在 spin 调用方式；
+2. `ros2 topic pub --once` 后立即 `ros2 topic info /balance_enable -v` 可见固件订阅端点（Subscription count = 1），排除"固件根本没订阅"。
+
+**修复** ：`rclc_executor_spin_some(&executor, 10)` → `rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10))`（10 ms）。烧录后 `[CMD] arm requested` 立即出现，下行链路打通。教训：rclc 的 timeout 一律按 **纳秒** 传参，毫秒换算必须显式写 `RCL_MS_TO_NS()`，不可裸写数字。
 
 ### 安全提示
 
