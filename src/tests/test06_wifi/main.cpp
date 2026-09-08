@@ -11,6 +11,7 @@
 #include <rclc/rclc.h>
 
 #include "config.h"
+#include "net_boot.h"
 
 namespace {
 
@@ -96,10 +97,9 @@ void micro_ros_task(void* parameter) {
     static rclc_executor_t executor;  // 执行器, 用于管理订阅和计时器回调的执行
     static rcl_node_t node;           // ROS 节点
 
-    // 1. 设置传输协议并延时等待设置完成
+    // 1. 设置传输协议并延时等待设置完成 (STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定)
     IPAddress agent_ip;
-    agent_ip.fromString(AGENT_IP_STR);
-    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
+    wifi_role_boot(agent_ip);
     delay(TRANSPORT_SETUP_MS);
 
     // 2. 初始化内存分配器

@@ -74,10 +74,28 @@ constexpr double S_TO_NS = 1e6;        // 秒 -> 纳秒 (时间戳换算)
 
 constexpr uint32_t LOOP_DELAY_MS = 10; // 主循环调度节拍, 单位 ms
 
+// ---- 网络拓扑模式 ----
+
+// 0 = 接入(STA)模式(默认): ESP32 作为 STA 连外部 AP(路由/手机热点/电脑热点), 沿用现有方式
+// 1 = 自组网(AP)模式(试验): ESP32 自开 2.4G SoftAP, 上位机作为 STA 连入并配静态 IP
+// 用 #ifndef 包裹以支持命令行 -DWIFI_ROLE_AP=1 覆盖, 便于不改本文件做 AP 试验
+#ifndef WIFI_ROLE_AP
+#define WIFI_ROLE_AP 0
+#endif
+
 // ---- 网络配置 ----
 
-constexpr char AGENT_IP_STR[] = "192.168.2.115"; // 主机 IP(运行 micro-ROS Agent 的电脑)
-constexpr uint16_t AGENT_PORT = 8888;            // Agent UDP 端口
+#if WIFI_ROLE_AP == 1
+// AP 模式: agent 跑在上位机(STA 侧), 上位机须手动静态 IP 192.168.4.100
+constexpr char AGENT_IP_STR[] = "192.168.4.100"; // 上位机静态 IP(运行 micro-ROS Agent 的电脑)
+constexpr char WIFI_AP_SSID[] = "fishbot-ap";    // SoftAP 广播 SSID
+constexpr char WIFI_AP_PASS[] = "fishbot123";    // WPA2 密码, >=8 位
+constexpr uint8_t WIFI_AP_CHANNEL = 6;           // 2.4G 信道 1~13
+#else
+// STA 模式(默认): agent 跑在外部 AP 固定网关侧
+constexpr char AGENT_IP_STR[] = "10.42.0.1"; // 主机 IP(运行 micro-ROS Agent 的电脑)
+#endif
+constexpr uint16_t AGENT_PORT = 8888; // Agent UDP 端口
 
 // ---- WiFi 凭据 ----
 // 注意: 凭据须为可写 char 数组, 因 set_microros_wifi_transports 接口要求 char*, 不能 constexpr
