@@ -144,7 +144,7 @@ YuxiangROS-PIO-learning/
 ├── lib/                         # 库（私有库 + 本地化第三方库）
 │   ├── Kinematics/              # 两轮差速运动学（正/逆解 + 里程计），纯算法
 │   ├── PIDController/           # 位置式 PID，纯算法
-│   ├── RobotConfig/             # 共用编译期配置（模板 config.example.h + docs）
+│   ├── RobotConfig/             # 共用编译期配置（config.example.h 模板 + net_boot.h + docs）
 │   ├── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
 │   ├── Esp32McpwmMotor/         # 第三方：MCPWM 电机驱动（gitignore，不入库）
 │   ├── Esp32PcntEncoder/        # 第三方：PCNT 编码器读取（gitignore，不入库）

@@ -163,7 +163,7 @@ YuxiangROS-PIO-learning/
 ├── lib/                         # libraries (private + localized third-party)
 │   ├── Kinematics/              # two-wheel differential kinematics (fwd/inv + odom), pure algorithm
 │   ├── PIDController/           # positional PID, pure algorithm
-│   ├── RobotConfig/             # shared compile-time config (template config.example.h + docs)
+│   ├── RobotConfig/             # shared compile-time config + network bootstrap (config.example.h, net_boot.h, docs)
 │   ├── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
 │   ├── Esp32McpwmMotor/         # 3rd-party: MCPWM motor driver (git-ignored)
 │   ├── Esp32PcntEncoder/        # 3rd-party: PCNT encoder reading (git-ignored)
