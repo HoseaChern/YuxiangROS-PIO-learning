@@ -145,7 +145,8 @@ kine.set_motor_param(0.06f);   // 标定: 每脉冲前进 0.06 mm
 kine.set_wheel_distance(160.0f); // 轮间距 160 mm
 
 // 控制周期内采样编码器(左右读数)并自动更新里程计
-kine.update_motor_speed(millis(), left_ticks, right_ticks); // 经适配后为 ticks[2] 数组
+int32_t ticks[2] = {left_ticks, right_ticks}; // [0]=左编码器读数, [1]=右编码器读数
+kine.update_motor_speed(millis(), ticks);
 
 // 速度环下发: 目标线速度 200 mm/s, 角速度 0
 float body_velocities[2] = {200.0f, 0.0f};
@@ -155,7 +156,3 @@ kine.kinematics_inverse(body_velocities, motor_speeds);
 // 读取里程计
 const odom_t& odom = kine.get_odom();
 ```
-
-## 8. 已知遗留事项
-
-- `main.cpp` 与 `test05`-`test07` 的调用点尚未适配新接口(旧版 `set_motor_param` 双参、`kinematics_inverse` 四参、`update_motor_speed` 三参),待后续统一修改。

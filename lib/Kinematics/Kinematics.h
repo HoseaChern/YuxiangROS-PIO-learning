@@ -16,19 +16,10 @@ using odom_t = struct odom_t {
 
 /**
  * @brief 运动学计算类
- * 
- * @note 
- * 运动学正逆解: \note
- * 正解: 轮转速 -> 直线速度和角速度 \note
- * 正解公式: \note
- * v = (v_left + v_right) / 2; omega = (v_right - v_left) / wheel_distance \note
- * 逆解: 直线速度和角速度 -> 轮转速 \note
- * 逆解公式: \note
- * v_left = v - omega * wheel_distance / 2; v_right = v + omega * wheel_distance / 2 \note
- * 
- * 里程计: \note
- * 里程计公式: \note
- * x = x + v * cos(yaw) * dt; y = y + v * sin(yaw) * dt; yaw = yaw + omega * dt \note
+ *
+ * 做什么: 由左右轮转速推算车体线速度/角速度 (正解), 由车体线速度/角速度推算左右轮转速 (逆解),
+ *         并基于编码器采样与差速模型累积里程计位姿 (x, y, yaw)。
+ * 为什么: 公式推导、单位约定与接口说明见库文档 docs/README.md 第 3 章「核心公式」。
  */
 class Kinematics {
   private:

@@ -58,10 +58,8 @@ RobotConfig 将之统一收纳，`config.h` 不入版本库，使配置调整与
 
 ### 不收纳
 
-- `EXECUTOR_HANDLES`：micro-ROS 执行器句柄数，按各固件订阅/定时器数量取值
-  （main=2 / test06=0 / test07=1），保留在各固件本地定义。
-- `BalanceState`：test10/test11 的两轮自平衡状态机枚举（`kIdle`/`kRunning`），属行为逻辑
-  而非配置数据，且仅两个固件使用，保留在各固件本地定义。
+- `EXECUTOR_HANDLES`：micro-ROS 执行器句柄数，按各固件订阅/定时器数量取值（main=2 / test06=1 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1），保留在各固件本地定义。
+- `BalanceState`：test10/test11 的两轮自平衡状态机枚举（`kIdle`/`kRunning`），属行为逻辑而非配置数据，且仅两个固件使用，保留在各固件本地定义。
 
 ## 4. 使用流程
 

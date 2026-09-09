@@ -173,11 +173,11 @@ void odom_callback(rcl_timer_t* timer, int64_t last_call_time) {
 
 /**
  * @brief micro-ROS 任务
- * 
+ *
+ * 1. 单独创建一个任务运行 micro-ROS, 相当于一个线程;
+ * 2. xTaskCreate() 要求的任务函数原型必须为: void task(void* parameter)。
+ *
  * @param parameter 任务参数
- * @note 
- * 1. 单独创建一个任务运行 micro-ROS, 相当于一个线程 \note
- * 2. xTaskCreate() 要求的任务函数原型必须为: void task(void* parameter) \note
  */
 void micro_ros_task(void* parameter) {
     (void)parameter; // 显式转换为 void，告诉编译器"我故意不用"
