@@ -8,7 +8,7 @@
 namespace {
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
-// 编译期常量 (串口/引脚/采样周期/测试转速/编码器标定) 见 lib/RobotConfig/config.h
+// 编译期常量 (串口/引脚/采样周期/测试转速/编码器标定) 见 include/RobotConfig/config.h
 
 Esp32McpwmMotor motor;        // 电机驱动对象 (setup/loop 共享)
 Esp32PcntEncoder encoders[2]; // 编码器对象数组 (setup/loop 共享)

@@ -1,12 +1,16 @@
 /**
  * @file main.cpp
- * @brief test13_balance: 两轮自平衡无线操控固件 (micro-ROS + WiFi 键盘遥控)
+ * @brief test13_balance: 两轮自平衡无线操控固件 (阶段四: micro-ROS + WiFi 键盘遥控)
  *
  * 在 test12 (速度环 PI + 直立环 PD 串级 + 单一转向环差模叠加) 基础上引入 micro-ROS 与 WiFi,
  * 由上位机 teleop_twist_keyboard 通过 /cmd_vel 键盘遥控; 武装/解除由 /balance_enable
  * 话题控制, Agent 会话断开自动解除武装。转向环与 test12 共用单一完整转向环
  * (Δ = Kp·θ_cmd + Kd·ωz), 差异仅在目标转角 θ_cmd 来源: /cmd_vel angular.z 角速度指令
  * 折算为目标转角 (无指令 ωz,set=0 时 θ_cmd=0, 仅剩阻尼项走直线)。
+ *
+ * 串口 (115200) 仅作调试辅助通道: 保留 's' 武装翻转 (等价 /balance_enable) 与 'c'
+ * 标定机械中值 (仅 kIdle), 其余 test12 的步进类命令 (速度/运动开关/转向步进) 由
+ * ROS /cmd_vel 话题替代; 串口处理与 test12 的差异 (逐周期单字符/采样期屏蔽) 见函数注释。
  *
  * 详细说明见 docs/Balance_Car_Notes.md: 命令通道/限幅 7.1, 转向控制 7.2,
  * 并发模型/安全 7.3, 方向约定 1.6/5.2, 上位机操作步骤 8.3。
@@ -39,7 +43,7 @@
 
 namespace {
 
-// ---- 固件本地常量 (跨固件共用参数见 lib/RobotConfig/config.h) ----
+// ---- 固件本地常量 (跨固件共用参数见 include/RobotConfig/config.h) ----
 
 // micro-ROS 执行器句柄数: /cmd_vel 订阅 + /balance_enable 订阅
 constexpr uint8_t EXECUTOR_HANDLES = 2;
@@ -128,7 +132,7 @@ void setup() {
     speed_pid.update_pid(SPEED_KP, SPEED_KI, SPEED_KD);
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
-    // 配置直立环 PD 控制器: 库层强制纯 PD (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比
+    // 配置直立环 PD 控制器: 库层强制纯 PD 无 I 项 (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比范围
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
@@ -201,8 +205,12 @@ void enable_callback(const void* msg) {
 /**
  * @brief 处理串口命令 (在 control_step 中逐周期调用)
  *
- * 与 test12 同构: 非阻塞逐周期采样, 不 delay 阻塞控制节拍。
  * 字符集: 's' 武装/解除 (等价 /balance_enable 翻转), 'c' 标定机械中值 (仅 kIdle)。
+ * 主命令通道为 /cmd_vel 话题, 串口仅调试辅助, 故与 test12 有两处刻意差异:
+ *   - 每周期至多消费一个字符 (10-12 用 while 清空积压): 串口积压摊薄到多周期处理,
+ *     避免单周期长时间读 UART 拉长 5ms 控制节拍;
+ *   - 标定采样期间 return, 不响应新命令 (10-12 采样期间仍轮询): 保证 0.2s 采样窗口
+ *     不被 's' 等命令打断, 采样数据纯净。
  *
  * @param theta 当前控制角 (deg, 后倾为正), 标定时逐周期累加求平均
  */
@@ -335,9 +343,10 @@ void control_step() {
         // 速度环 PI (外环): 目标 v_set (mm/s), 输出为期望角度增量 (deg), 限幅防目标角过大
         const int16_t speed_output = speed_pid.update_pwm_speed(target_speed_mm_s, speed_mm_s);
 
-        // 直立环 PD (内环): 目标 = 机械中值 - 速度环输出, 输入为 [角度, 角速度] 数组
+        // 直立环 (内环, PD): PWM = Kp*(target_angle - theta) - Kd*omega_pitch (库层强制纯 PD, 见 setup)
+        // target_angle = 机械中值 - 速度环输出 (串级嵌套)
         const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
-        const float inputs[2] = {theta, omega_pitch};
+        const float inputs[2] = {theta, omega_pitch}; // [当前角度, 当前角速度]
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
         // 转向环 (单一完整转向环, docs 7.2): 遥控角速度指令折算为目标转角指令
@@ -363,7 +372,7 @@ void control_step() {
         Serial.printf(
             "state=%s theta=%.2f omega=%.2f omega_z=%.2f speed=%.1f target=%.1f "
             "wz_cmd=%.1f delta=%d pwm_L=%d pwm_R=%d\n",
-            balance_state == BalanceState::kIdle ? "idle" : "run",
+            balance_state == BalanceState::kIdle ? "IDLE" : "RUN",
             theta,
             omega_pitch,
             omega_z,

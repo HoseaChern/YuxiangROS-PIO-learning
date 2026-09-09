@@ -39,7 +39,7 @@
 
 namespace {
 
-// ---- 固件本地常量 (跨固件共用参数见 lib/RobotConfig/config.h) ----
+// ---- 固件本地常量 (跨固件共用参数见 include/RobotConfig/config.h) ----
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
@@ -114,7 +114,7 @@ void setup() {
     speed_pid.update_pid(SPEED_KP, SPEED_KI, SPEED_KD);
     speed_pid.output_limit(SPEED_OUTPUT_LIMIT);
 
-    // 配置直立环 PD 控制器: 库层强制纯 PD (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比
+    // 配置直立环 PD 控制器: 库层强制纯 PD 无 I 项 (update_pwm_upright 忽略 ki_), 输出限幅对齐 MCPWM 占空比范围
     balance_pid.update_pid(UPRIGHT_KP, UPRIGHT_KI, UPRIGHT_KD);
     balance_pid.output_limit(UPRIGHT_PWM_LIMIT);
 
@@ -328,8 +328,8 @@ void control_step() {
         // 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出
         const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
 
-        // 直立环: = Kp*(target_angle - theta) - Kd*omega (库层强制纯 PD)
-        const float inputs[2] = {theta, omega_pitch}; // [角度, 角速度]
+        // 直立环 (内环, PD): PWM = Kp*(target_angle - theta) - Kd*omega_pitch (库层强制纯 PD, 见 setup)
+        const float inputs[2] = {theta, omega_pitch}; // [当前角度, 当前角速度]
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
         // 6. 差模部分: 单一完整转向环输出 Δ (docs 5.3)
@@ -357,7 +357,7 @@ void control_step() {
         Serial.printf(
             "state=%s motion=%s theta=%.2f omega=%.2f omega_z=%.2f speed=%.1f target=%.1f "
             "turn_cmd=%.1f delta=%d pwm_L=%d pwm_R=%d\n",
-            balance_state == BalanceState::kIdle ? "idle" : "run",
+            balance_state == BalanceState::kIdle ? "IDLE" : "RUN",
             motion_enabled ? "on" : "off",
             theta,
             omega_pitch,

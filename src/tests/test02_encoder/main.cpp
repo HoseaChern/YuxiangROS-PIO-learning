@@ -7,7 +7,7 @@
 namespace {
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
-// 编译期常量 (串口/编码器引脚/采样间隔) 见 lib/RobotConfig/config.h
+// 编译期常量 (串口/编码器引脚/采样间隔) 见 include/RobotConfig/config.h
 
 Esp32PcntEncoder encoders[2];
 

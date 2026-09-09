@@ -7,7 +7,7 @@
 namespace {
 
 // ---- 可变全局状态 (跨 setup/loop 共享) ----
-// 编译期常量 (串口/引脚/测试参数) 见 lib/RobotConfig/config.h
+// 编译期常量 (串口/引脚/测试参数) 见 include/RobotConfig/config.h
 
 Esp32McpwmMotor motor;
 

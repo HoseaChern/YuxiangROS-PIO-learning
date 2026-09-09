@@ -32,7 +32,7 @@
 
 namespace {
 
-// ---- 固件本地常量 (跨固件共用参数见 lib/RobotConfig/config.h) ----
+// ---- 固件本地常量 (跨固件共用参数见 include/RobotConfig/config.h) ----
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
@@ -205,10 +205,9 @@ void control_step() {
             break;
         }
 
-        // 直立环输出: PWM = Kp*(theta_0 - theta) - Kd*omega
+        // 直立环输出: PWM = Kp*(theta_0 - theta) - Kd*omega (库层强制纯 PD, 见 setup)
         // update_pwm_upright 目标角度直接入参: 此处为机械中值 theta_0
         const float inputs[2] = {theta, omega}; // [当前角度, 当前角速度]
-        // = Kp*(theta_0 - theta) - Kd*omega
         pwm_balance = balance_pid.update_pwm_upright(zero_pitch_deg, inputs);
 
         motor.updateMotorSpeed(MOTOR_LEFT, pwm_balance);
@@ -216,7 +215,7 @@ void control_step() {
         break;
     }
 
-    // 5. 低频状态打印: 100ms 由宏 BALANCE_PRINT_MS 体现, 定义于 lib/RobotConfig/config.h (值 100 即 10Hz);
+    // 4. 低频状态打印: 100ms 由宏 BALANCE_PRINT_MS 体现, 定义于 include/RobotConfig/config.h (值 100 即 10Hz);
     //    下方 if 判断 "now - last_print_ms >= BALANCE_PRINT_MS" 即 100ms 到点才整行打印一次, 供串口监视器观察。
     const uint32_t now = millis();
     static uint32_t last_print_ms = 0;

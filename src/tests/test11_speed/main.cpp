@@ -38,7 +38,7 @@
 
 namespace {
 
-// ---- 固件本地常量 (跨固件共用参数见 lib/RobotConfig/config.h) ----
+// ---- 固件本地常量 (跨固件共用参数见 include/RobotConfig/config.h) ----
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
@@ -57,7 +57,7 @@ BalanceState balance_state = BalanceState::kIdle; // 当前状态机状态
 bool balance_armed = false;                       // 武装标志 ('s' 命令切换, 倒地自动解除)
 float zero_pitch_deg = UPRIGHT_ZERO_PITCH_DEG;    // 机械中值 theta_0, 可由 'c' 命令在线标定
 float target_speed_mm_s = SPEED_SETPOINT_MM_S;    // 期望车体速度 v_set, 未武装时由 '+'/'-' 命令设定
-bool motion_enabled = false;                      // 运动使能开关 ('w' 往返切换, 仅运行态有效; 起控/解除/倒地清零)
+bool motion_enabled = false; // 运动使能开关 ('w' 往返切换, 仅运行态有效; 起控/解除/倒地清零)
 
 // ---- 函数前向声明 (内部链接) ----
 
@@ -294,9 +294,8 @@ void control_step() {
         // 串级嵌套: 直立环目标角度 = 机械中值 theta_0 - 速度环输出 (docs 3.3 公式 ③)
         const float target_angle = zero_pitch_deg - static_cast<float>(speed_output);
 
-        // 直立环 (内环, PD): PWM = Kp*(target_angle - theta) - Kd*omega
+        // 直立环 (内环, PD): PWM = Kp*(target_angle - theta) - Kd*omega (库层强制纯 PD, 见 setup)
         const float inputs[2] = {theta, omega}; // [当前角度, 当前角速度]
-        // = Kp*(target_angle - theta) - Kd*omega
         pwm_balance = balance_pid.update_pwm_upright(target_angle, inputs);
 
         motor.updateMotorSpeed(MOTOR_LEFT, pwm_balance);
@@ -304,7 +303,7 @@ void control_step() {
         break;
     }
 
-    // 6. 低频状态打印: 100ms 由宏 BALANCE_PRINT_MS 体现, 定义于 lib/RobotConfig/config.h (值 100 即 10Hz);
+    // 5. 低频状态打印: 100ms 由宏 BALANCE_PRINT_MS 体现, 定义于 include/RobotConfig/config.h (值 100 即 10Hz);
     //    下方 if 判断 "now - last_print_ms >= BALANCE_PRINT_MS" 即 100ms 到点才整行打印一次, 供串口监视器观察。
     const uint32_t now = millis();
     static uint32_t last_print_ms = 0;
