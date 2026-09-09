@@ -1,36 +1,38 @@
 # 上位机 WiFi 局域网配置笔记
 
-> 整理日期：2026-09-06
-> 适用平台：Ubuntu 24.04 + NetworkManager（Windows 仅附备查）
-> 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_SSID`/`WIFI_PASS`）。
+> 整理日期：2026-09-09 适用平台：Ubuntu 24.04 + NetworkManager；ROS 2 Jazzy 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_ROLE_AP`、`WIFI_SSID`/`WIFI_PASS`、`WIFI_AP_SSID`/`WIFI_AP_PASS`/`WIFI_AP_CHANNEL`） 上位机 Agent 工作区：`~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`（本文第 1、3 节引述） 拓扑方案原型固件：`test06_wifi`（`pio run -e test06_wifi`）
+
+本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证）。
 
 ---
 
-## 0. 计算机网络基础理论
+## 0. 计算机网络分层基础
 
-### 0.1 分层模型：每层只解决一层问题
+> 分层的唯一目的：把任意一次通信故障归到某一层，诊断按 **"自底向上"** 顺序排查，因为上层故障会掩盖下层症状。
 
-网络通信按"层"组织，每层只处理自己职责内的字段，对上层透明。TCP/IP 把 OSI 七层压成四层，本项目自底向上可映射为一张"故障归因表"：
+### 0.1 分层模型与封装解封
 
-| 层     | 职责           | 本项目实体             | 现象关键词        |
-| ------ | -------------- | ---------------------- | ----------------- |
-| 物理层 | 比特与电磁信号 | 2.4GHz 射频            | 搜不到 / 信号弱   |
-| 链路层 | 帧、介质访问   | 802.11 SSID、AP 角色   | 关联失败 / 被隔离 |
-| 网络层 | 跨网寻址与路由 | IPv4 `10.42.0.x`、子网 | ping 不通网关     |
-| 传输层 | 端到端会话     | UDP 8888 / TCP 8889    | Agent 无会话      |
-| 应用层 | 语义解释       | ROS2 / micro-ROS XRCE  | 话题无数据        |
+网络通信按"层"组织，每层只处理自己职责内的字段，对上层透明。TCP/IP 把 OSI 七层压成四层：
 
-发送方逐层"加头"（封装），接收方逐层"去头"（解封）：
+| 层     | 职责           | 典型实体（通用）                   |
+| ------ | -------------- | ---------------------------------- |
+| 物理层 | 比特与电磁信号 | 网线、光纤、射频天线、无线信道     |
+| 链路层 | 帧、介质访问   | 以太网 MAC、802.11、交换机、AP/STA |
+| 网络层 | 跨网寻址与路由 | IPv4/IPv6、子网掩码、网关、ARP     |
+| 传输层 | 端到端会话     | TCP、UDP、端口号                   |
+| 应用层 | 语义解释       | HTTP、DNS、SSH、自有应用协议       |
+
+发送方逐层"加头"（封装），接收方逐层"去头"（解封）。以主机 A 向同局域网主机 B 发送一个 HTTP 请求为例：
 
 ```text
-ESP32 侧封装                      电脑侧解封
-[XRCE 载荷]                       [XRCE 载荷]
-+UDP头 → [UDP|XRCE]       →       [UDP|XRCE] -UDP头
-+IP头  → [IP|UDP|XRCE]            [IP|UDP|XRCE]  -IP头
-+802.11 → [帧|IP|UDP|XRCE]   →    [帧|IP|UDP|XRCE] -帧头
+主机 A 侧封装                          主机 B 侧解封
+[HTTP 载荷]                             [HTTP 载荷]
++TCP头   -> [TCP|HTTP]          ->      [TCP|HTTP]    -TCP头
++IP头    -> [IP|TCP|HTTP]               [IP|TCP|HTTP] -IP头
++以太网头 -> [帧|IP|TCP|HTTP]   ->      [帧|IP|TCP|HTTP] -帧头
 ```
 
-这就是第 5 节排障表"自底向上"的原因：**上层故障会掩盖下层症状** ——频段不对时表现为"连不上"，绝不会先报"话题无数据"。
+诊断必须自底向上的原因：物理介质断开（物理层）时表现为"连不上"，绝不会先报"应用无响应"（应用层）。
 
 ### 0.2 物理层：频率、波长与 2.4/5 GHz 之争
 
@@ -45,351 +47,509 @@ WiFi 两个频段都落在 ISM 免许可频段，波长差异直接决定传播�
 - 2.4 GHz：$\lambda \approx 12.5\ \text{cm}$
 - 5 GHz：$\lambda \approx 6\ \text{cm}$
 
-波长越长，绕射能力越强、穿墙衰减越小——所以 2.4G 覆盖占优，5G 更"怕墙"。自由空间路径损耗定量看：
+波长越长，绕射能力越强、穿墙衰减越小，故 2.4G 覆盖占优，5G 更"怕墙"。自由空间路径损耗（$d$ 单位 km、$f$ 单位 MHz）定量为：
 
 $$
-\text{FSPL(dB)} = 20\lg d + 20\lg f + 32.44 \quad (d\ \text{单位 km},\ f\ \text{单位 MHz})
+\text{FSPL(dB)} = 20\lg d + 20\lg f + 32.44
 $$
 
-同一距离下 5 GHz 比 2.4 GHz 多损耗：
+同一距离下 5 GHz 比 2.4 GHz 多损耗约：
 
 $$
 20\lg\frac{5000}{2400} \approx 6.4\ \text{dB}
 $$
 
-即 5G 天生比 2.4G 弱约 6.4 dB。但 2.4G 的代价是 **拥挤** ：WiFi 信道 1–13、蓝牙、Zigbee、微波炉（~2.45 GHz）全挤在 2.4 GHz 附近，同频干扰大、有效速率天花板低——20 MHz 下 802.11n 单流约 72 Mbps，对本项目每秒几百字节的 XRCE 消息绰绰有余。
+2.4G 的代价是拥挤：WiFi 信道 1–13、蓝牙、Zigbee、微波炉（约 2.45 GHz）共享该频段，同频干扰大、有效速率天花板低。20 MHz 下 802.11n 单流约 65–72 Mbps，对传感器遥测这类每秒几 KB 的周期性载荷绰绰有余。
 
-**物理层结论**：能否收到某频段由 **射频前端硬件** 决定，不是软件选项。ESP32-S3 只做了 2.4G b/g/n，5G 信号对它物理不可见——这就是全文所有方案必须"把 AP 逼到 2.4G"的根因。
+物理层一般性结论：设备能否接收某频段由射频前端硬件决定，不是软件选项。射频仅支持 2.4G 的终端对 5G 信号物理不可见，方案必须把无线接入点配置在 2.4G。
 
 ### 0.3 链路层：802.11 角色、SSID 与二层隔离
 
 802.11 网络有两种角色：
 
 - **AP（Access Point）**：基础设施模式中心，周期性广播 Beacon；
-- **STA（Station）**：终端，经"扫描 → 认证 → 关联（Association）"挂到 AP 下。
+- **STA（Station）**：终端，经"扫描 -> 认证 -> 关联（Association）"挂到 AP 下。
 
-**SSID** 是给人看的网络名；**BSSID** 是 AP 的 MAC，机器真正按它区分（同名 SSID 可有多个 AP——这正是"SSID 同名设备冲突"现象的来源）。
-
-2.4G 信道中心频率：
+SSID 是给人看的网络名；BSSID 是 AP 的 MAC 地址，机器按它区分设备。同名 SSID 可有多个 AP，这是"同名设备冲突"的来源。2.4G 信道中心频率：
 
 $$
-f_n = 2407 + 5n\ \text{MHz} \quad\Rightarrow\quad \text{信道1}=2412,\ \text{信道6}=2437,\ \text{信道11}=2462
+f_n = 2407 + 5n\ \text{MHz}
 $$
 
-相邻信道间隔仅 5 MHz，而单信道占宽 20 MHz → 只有相隔 ≥5 信道的 1/6/11 互不重叠。这就是换信道时只考虑 1/6/11 的原因。
+相邻信道间隔仅 5 MHz，单信道占宽 20 MHz，只有相隔 5 个信道的 1/6/11 互不重叠。代入 $n=1,6,11$ 得中心频率 2412/2437/2462 MHz，这是换信道只考虑 1/6/11 的原因。
 
-**二层隔离（AP isolation / client isolation）**：STA 之间的帧本应由 AP 按 MAC 二层转发；启用隔离后，AP **丢弃 client→client 的帧**，只放行 client↔AP↔上联口。这是纯二层的"横向通信禁令"，与 IP/网段无关——所以手机热点默认隔离时，**同网段也 ping 不通**，改 IP 无济于事（§2.2 的根源）。
+**二层隔离（AP isolation / client isolation）**：STA 之间的帧本应由 AP 按 MAC 二层转发；启用隔离后，AP 丢弃 client 到 client 的帧，只放行 client 与 AP 及上联口之间的帧。这是纯二层的横向通信禁令，与 IP 网段无关，所以默认隔离的手机热点里，同网段的两台终端也 ping 不通，改 IP 无济于事。
 
-### 0.4 网络层：IP、子网、网关与 NAT
+### 0.4 网络层：IPv4 地址、子网、路由与 NAT
 
-IPv4 地址 + 掩码划出"网络号/主机号"。以 `10.42.0.1/24`（掩码 `255.255.255.0`）为例：
+IPv4 地址是 32 位无符号整数，习惯写成点分十进制：每 8 位一组、十进制、点分隔，取值范围 0.0.0.0 ~ 255.255.255.255。编址的核心思想是**分层**：地址高位是网络号，低位是主机号。路由器只按网络号转发、不感知网络内部的主机，路由表规模随网络数而非主机数增长。这是"跨网路由"与"同子网直达"在结构上的分界。
 
-```text
-网络号 10.42.0    本子网内直达（不查路由表）
-主机号 .1          = 热点主机自身（网关/Agent）
-.0                 网络地址（不可分配）
-.255               广播地址
-.2 ~ .254          终端（DHCP 租约分发，ESP32 常取 .2+）
-```
+**子网掩码与 CIDR**：掩码是高位连续的 1，其位数即前缀长度，记法为"地址/前缀"。$192.168.1.10/24$ 表示前 24 位是网络号，等价于掩码 $255.255.255.0$。三类关键地址由掩码与地址按位运算得出：网络地址 $A \land M$（地址与掩码按位与），标识子网本身，不可分配；广播地址 $A \lor \lnot M$，发往它的包被子网内所有主机接收；介于两者之间的其余值才是可分配的主机地址。设前缀长度为 $p$、主机位 $h = 32 - p$，每子网可分配主机数为：
 
-同子网两台主机先 ARP 查对方 MAC 再二层直通；**跨子网必须交给网关转发**。NetworkManager 热点以 `shared` 模式自建 DHCP + NAT：自己固定 `10.42.0.1`，用内置 dnsmasq 给终端发 `10.42.0.x`，终端出公网流量经源地址转换（NAT）从上联口出去。
+$$
+2^h - 2
+$$
 
-对本项目最关键的是： **Agent 与 ESP32 同处 `10.42.0.0/24`，互相直达，根本不经 NAT** ——NAT 只影响"电脑上要出公网的其他应用"。这也解释了为何要求网段对齐固件 `AGENT_IP_STR`：`10.42.0.1` 正是热点网关/主机地址，ESP32 发往它的包一跳即达。
+减去的两个即网络地址与广播地址。举一反三：/24 有 $2^8 - 2 = 254$ 台，日常局域网最常见；/30 有 $2^2 - 2 = 2$ 台，只够两点直连，常用作路由器间链路段；/32 的 $h = 0$，不可作子网，表示"单台主机地址"。
 
-### 0.5 传输层：端口、UDP 与 TCP
+编址历史：早期按首字节硬分 A/B/C 类（/8、/16、/24），粒度固定、地址浪费严重，已被 **CIDR**（无类别域间路由）取代。CIDR 允许任意前缀长度，地址空间按需切分，并把多条相邻路由聚合成一条，路由器表项随之减少。
 
-IP 负责"把包送到哪台主机"，**端口**负责"送到这台主机上的哪个进程"——同一 IP 上同时跑 8888（micro-ROS）与 8889（透传桥）互不干扰，靠的就是端口号分离。
+常用保留地址段（RFC 1918 等，一般性知识）：
 
-**UDP**（8 字节头：源端口/目的端口/长度/校验和）：
+- 0.0.0.0/8：本网络。源地址 0.0.0.0 出现在主机"尚不知自身 IP"的启动期，如 DHCP 发现报文；目的 0.0.0.0 与掩码 /0 组成默认路由，指"除已知网络外一律走这里"；
+- 127.0.0.0/8：环回。发给它的包不出本机，用于本机自测协议栈；
+- 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16：私有地址。公网路由不传播，任何组织可内部复用，主机数分别约 $2^{24}$、$2^{20}$、$2^{16}$；
+- 169.254.0.0/16：链路本地。主机找不到 DHCP 服务端时自动配置此段地址（APIPA），同链路设备凭它仍能互通，但不跨网；
+- 224.0.0.0/4：组播，一对多；255.255.255.255 是全网广播，不出本子网。
 
-- 无连接：发前不握手；
-- 无重传、无有序保证：丢包即丢，由上层容忍；
-- 适合周期性小报文：micro-ROS 的 XRCE 消息按周期重复发布，丢一两帧只表现为该周期跳变，无需可靠语义 → Agent 侧 `udp4` + `best-effort` QoS 正是为此设计。
+私有地址是"局域网互通不需要公网"的制度基础：同一私网内两台主机通信，包只在本地交换，不经过任何运营商网络。
 
-**TCP**（20 字节头 + 三次握手建立）：
+**转发路径**：同子网内，发送方用 ARP 把目的 IP 解析成目的 MAC，帧二层直达；跨子网时，发送方把帧交给默认网关（路由器）的 MAC，路由器查路由表按"目的网络号 -> 下一跳"逐跳转发。每经一跳，IPv4 头部的 TTL（生存时间）减 1，减到 0 即丢弃并向源发 ICMP 超时报文——`traceroute` 正是靠递增 TTL 让沿途每跳都回一个超时来探测路径。`ping` 使用 ICMP Echo 请求/应答，能 ping 通只证明到该 IP 的网络层通路存在，不证明其上有任何服务在听。
 
-- 面向连接、字节流、可靠有序（序号/确认/重传）；
-- 适合不可丢的连续字节流：激光雷达 8889 透传即是。
+**DHCP**：主机启动时广播"我要地址"，服务端从地址池取一个租约下发并记录期限，到期可续。地址池须避开网络地址与广播地址，故 /24 池的可用范围是去掉头尾后的一段。
 
-传输层最后一步是**绑定**：Agent 默认绑 `0.0.0.0`（所有接口）才能收到 ESP32 从无线口进来的入站包；若只绑 `127.0.0.1` 则外部永远连不上——"能 ping 通网关却无会话"的常见原因之一。
+**NAT**：IPv4 只有 32 位、总量约 43 亿，远少于接入设备数，私有地址靠 NAT 上网。内网大量主机共用一个或少量公网 IP：出站时路由器把内网源地址改写为自己的公网地址并记录映射，回包按映射还原。公网因此只能到达路由器本身，内网主机对外不可达——"外部无法主动连接内网设备"是 NAT 的结构性结果，不是安全配置。映射表区分不同内网主机的关键字段是源端口，端口的具体语义见 0.5 节。
+
+### 0.5 传输层：端口号、UDP 与 TCP
+
+IP 负责把包送到主机，端口负责把数据交给主机上的哪个进程。端口是 16 位无符号数，取值 0 ~ 65535，IANA 分三段：0–1023 知名端口，通常需特权绑定，如 80（HTTP）、443（HTTPS）、22（SSH）、53（DNS）；1024–49151 注册端口，如 3306（MySQL）、5432（PostgreSQL）；49152–65535 动态端口，客户端出站连接的源端口通常取自这里。
+
+一个 socket 是"IP + 端口"二元组。TCP 连接由四元组唯一确定：源 IP、源端口、目的 IP、目的端口，改任一元即为不同连接；同一服务端口可承载海量并发连接，靠的就是各客户端源端口不同。UDP 无连接，报文只按"目的 IP:端口"投递。
+
+**UDP（用户数据报协议）**：首部固定 8 字节，含源端口、目的端口、长度、校验和各 2 字节。无连接，发送即走，无握手、无状态；不重传、不保序、不防重复，可靠性义务全部转给上层。校验和在 IPv4 中可选（填 0 表示不计算），在 IPv6 中强制。UDP 保留报文边界，一次发送对应一次接收。适用画像：
+
+- 查询-响应：如 DNS，一个请求一个应答，等不到就重发，无需连接；
+- 实时流：音视频帧过期即弃，重传旧帧反而有害；
+- 周期性遥测：丢一两帧可容忍，状态靠下一帧刷新；
+- 在 UDP 上自建可靠层：QUIC（HTTP/3 的底层传输）把握手与重传搬进 UDP，换取连接建立延迟与队头阻塞的收益。
+
+**TCP（传输控制协议）**：面向连接、面向字节流、可靠。首部最小 20 字节。可靠性由一组机制组合保证：
+
+- 序号与确认：每个字节一个序号，接收方以 ACK 告知已连续收到的位置，发送方据此识别缺口；
+- 超时重传：未在时限内确认的段重发，超时值随实测往返时间动态调整；
+- 流量控制：接收方把剩余缓冲容量（窗口 rwnd）随 ACK 带回，发送窗口不得超过 rwnd，防止淹没慢接收方；
+- 拥塞控制：发送方另持拥塞窗口 cwnd，慢启动从小值开始每轮倍增，丢包判拥塞则减半进入拥塞避免（每轮线性 +1），快重传/快恢复加速恢复。网络丢包率无法先验，只能靠探测逼近可用带宽，故拥塞控制是必要机制而非附加。
+
+连接生命周期以状态机概括。建立阶段三次握手（SYN -> SYN+ACK -> ACK），同时交换初始序号，防止旧连接的迟到段误入新连接；数据阶段双工独立推进序号；关闭阶段四次挥手（FIN -> ACK -> FIN -> ACK），先收 FIN 的一方进入半关闭（只能发不能收），主动关闭方最后停留 TIME_WAIT，等迟到段老化后再释放四元组，避免复用的新连接收到旧段。
+
+TCP 是字节流，不保留报文边界：一次发送可能被拆进多个段，多次发送也可能在一次接收中拼出，应用层必须自定消息边界（长度前缀、分隔符），否则解析错位——"粘包"由此而来。适用不可丢的连续流：文件传输、远程终端、数据库同步。与 UDP 对比：
+
+| 维度          | UDP                     | TCP                        |
+| ------------- | ----------------------- | -------------------------- |
+| 连接          | 无                      | 三次握手建立，四次挥手关闭 |
+| 可靠性        | 不保证                  | 序号/ACK/超时重传          |
+| 顺序          | 不保证                  | 字节流有序                 |
+| 边界          | 保留报文边界            | 字节流，应用自定界         |
+| 流控/拥塞控制 | 无                      | rwnd 流控，cwnd 拥塞控制   |
+| 首部          | 8 字节                  | 最小 20 字节               |
+| 适用          | 查询-响应、实时流、遥测 | 文件、终端、事务           |
+
+服务端进程接收前须先绑定监听地址：绑 0.0.0.0（通配）表示监听本机所有接口，任何接口进来的入站包都能命中；只绑 127.0.0.1 则仅本机进程能连。入站无响应时先分两问：包到没到（网络层，ping 验证）与进程有没有在听（传输层，端口是否监听）——"能 ping 通却连不上"是后者的典型症状。
 
 ### 0.6 收束：一次数据包的旅程
 
-把 0.1–0.5 串成一个实例：ESP32 上发一帧 odom 到 Agent。
+把 0.1–0.5 串成一个实例：主机 A 的浏览器向同网段主机 B 的 Web 服务请求一页。
 
 ```text
-[ESP32 固件] rcl_publish(odom)
-   ↓ XRCE 序列化
-[UDP socket → 10.42.0.1:8888]     (0.5 端口分离)
-   ↓ 加 UDP/IP 头，源 10.42.0.x
-[802.11 STA 已关联 2.4G AP]       (0.3 关联/SSID)
-   ↓ 空中 2.4GHz 帧                (0.2 频段)
-[电脑网卡 AP] 解帧 → 内核 IP 栈
-   ↓ 目的 10.42.0.1 命中本机      (0.4 同子网直达)
-[Agent UDP:8888 socket] 解包 → ROS 话题 (0.1 应用层)
+[主机 A 应用] 浏览器发起 HTTP GET
+   | TCP 连接 80 端口                 (0.5 端口分离)
+[TCP/IP 协议栈] 加 TCP/IP 头           (0.1 封装)
+[网卡已关联 2.4G AP]                   (0.3 关联/SSID)
+   | 空中 2.4GHz 帧                   (0.2 频段)
+[AP 转发] 二层按 MAC 转给主机 B
+[主机 B 网卡] 解帧 -> 内核 IP 栈
+   | 目的 IP 命中本机                  (0.4 同子网直达)
+[Web 服务 80 端口 socket] 解包 -> 响应 (0.1 应用层)
 ```
 
-任一步断掉，症状各有归属：断在 0.2 → 搜不到；0.3 → 关联失败/被隔离；0.4 → ping 不通；0.5 → 无会话；0.6 之前全通而话题无数据 → 查 Agent/应用层。 **诊断永远先问"症状在哪一层"，再去动那一层的旋钮** ——这就是第 5 节排障表的结构依据。
+任一步断掉，症状各有归属：断在物理层 -> 搜不到；链路层 -> 关联失败/被隔离；网络层 -> ping 不通；传输层 -> 无会话；以上全通而应用无数据 -> 查应用本身。诊断永远先问"症状在哪一层"，再去动那一层的旋钮。
 
 ---
 
-## 1. 背景：为什么需要一条 WiFi 局域网
+## 1. micro-ROS 与 ESP32 的网络配置工具
 
-- 下位机 ESP32-S3 通过 WiFi 与上位机通信，两个端口共用同一 WiFi/lwIP：
-  - **UDP 8888**：micro-ROS（`ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888`）；
-  - **TCP 8889**：激光雷达透传桥（`ros_serial2wifi tcp_server`）。
-- **硬件硬约束**：ESP32-S3 射频前端只支持 **2.4GHz（802.11 b/g/n）**。5GHz 信号对它"不存在"，搜都搜不到——这是硬件能力，不是配置问题。
-- 因此上位机热点必须落在 **2.4GHz**，且网段需与固件写死的 `AGENT_IP_STR` 对齐。
+本节把两侧可配置、可编程的网络组件列全，并给出工作区内的源码级引述：固件侧在 `include/`、`lib/micro_ros_platformio/` 与 `platformio.ini`，上位机侧在 Agent 工作区 `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`。
 
-## 2. 三种接入形态的演进与结论
+### 1.1 系统两侧与两条数据通道
 
-### 2.1 普通路由器
+通信两端是 ROS 2 上位机（Agent）与 ESP32 下位机（micro-ROS 客户端），会话协议为 XRCE（eXtremely Resource Constrained Environments），承载于 UDP。本项目的微控制器网络栈同时承载两条通道：
 
-- 双频并发，ESP32 只能连 2.4G 那个 SSID。
-- 典型卡点：
-  - **portal 认证** （企业与校园公网常见）：`WiFi.begin()` 能拿到 IP，但流量被劫持到认证页，Agent 会话建不起来；
-  - **客户端隔离（client isolation）/ AP 隔离** ：同路由下设备互访被断；
-  - 双频同名 SSID 时，设备可能被引导到 5GHz 而连不上。
+| 通道 | 端口 | 协议 | 用途             | 下位机侧          | 上位机侧                     |
+| ---- | ---- | ---- | ---------------- | ----------------- | ---------------------------- |
+| A    | 8888 | UDP  | micro-ROS XRCE   | `AGENT_PORT`      | `micro_ros_agent udp4`       |
+| B    | 8889 | TCP  | 激光雷达数据透传 | `BRIDGE_TCP_PORT` | `ros_serial2wifi tcp_server` |
 
-### 2.2 手机热点
+通道 A 的载荷是周期性话题，丢失一两帧表现为单周期跳变，故 UDP 足够；通道 B 是连续字节流，不可丢，故用 TCP。端口号在两个工作区成对出现，是"端到端对齐"的检查点：`config.h` 与上位机 Agent、`config.h` 与 `ros_serial2wifi` 必须一致。
 
-- 手机热点**可切换 2.4G/5G**（iOS 需手动开「最大兼容性」才锁 2.4GHz；Android 频段可设）。
-- 更致命的是 **互联受限** （普遍行为，非个例）：
-  - 手机热点默认启用 **客户端隔离** ，连入设备彼此不可见、不可互访，只开放 NAT 出口上网；
-  - 不少 ROM 的该隔离 **没有开关可关** （路由器上的 AP 隔离大多还能关，手机热点常关不了）；
-  - 手机不能同时作为 STA 连别的 WiFi 再转发（禁止 AP 互联/中继）。
-- 结论： **"ESP32 与电脑都挂手机热点再互通"这条路在系统层就被禁止** ，不是改网段能解决的。
+### 1.2 固件侧配置工具
 
-### 2.3 电脑网卡热点（当前方案）
+参数入口 `include/RobotConfig/config.h`。本文件由 `config.example.h` 复制而来，被 .gitignore 忽略（文件头注释 `config.h:3-7`），本地改部署环境只动它。
 
-- 用电脑无线网卡开 SoftAP，NetworkManager 热点 **默认共享网段 `10.42.0.0/24`，网关 `10.42.0.1`** ，恰好等于固件 `AGENT_IP_STR` → **固件零改动**。
-- ESP32 与 Agent 同机直连，一跳直达，无中间转发。
-- 前提（见 §3）：**无线网卡必须支持 AP 模式**。
+网络相关参数集中在 `config.h:65-92`：
 
-### 2.4 形态对比总表
+- `WIFI_ROLE_AP`（`config.h:70-72`）：用 `#ifndef` 包裹，默认 `0`，支持编译期 `-DWIFI_ROLE_AP=1` 覆盖，便于不改文件做 AP 试验；
+- `AGENT_IP_STR`：运行 Agent 的主机地址。`WIFI_ROLE_AP==1` 分支（`config.h:76-81`）取 `192.168.4.100`，并连同 `WIFI_AP_SSID`/`WIFI_AP_PASS`/`WIFI_AP_CHANNEL` 组成 AP 组；`#else` 分支（`config.h:82-85`）取 `10.42.0.1`；
+- `AGENT_PORT=8888`（`config.h:86`）；
+- `WIFI_SSID`/`WIFI_PASS`（`config.h:91-92`）：凭据须为可写 `char` 数组而非 `constexpr`，因 `set_microros_wifi_transports` 接口要求 `char*`（注释 `config.h:89`）。
 
-| 形态       | 频段供给                                 | ESP32 能否连            | 真正卡点                                                                            |
-| ---------- | ---------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
-| 普通路由器 | 双频并发                                 | 只连 2.4G SSID          | portal 认证；AP 隔离（多数可手动关）                                                |
-| 手机热点   | 可切 2.4G/5G（iOS「最大兼容性」锁 2.4G） | 需热点**显式落在 2.4G** | ① 默认 5G → 搜不到；② 客户端隔离默认开且常无开关 → 设备互访被禁止；③ 网段与固件不符 |
-| 电脑热点   | 网卡能力，可显式指定 `band bg`           | `band bg` 强制 2.4G     | 需**网卡支持 AP 模式**（§3）                                                        |
+网络自举入口 `include/NetBoot/net_boot.h`。`wifi_role_boot(agent_ip)`（`net_boot.h:52-69`）先由 `AGENT_IP_STR` 解析出 Agent 地址，再按 `WIFI_ROLE_AP` 分流：
 
-## 3. 电脑热点前置检查：网卡 SoftAP 能力
+```cpp
+#if WIFI_ROLE_AP == 1
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL);
+    ...
+    set_microros_wifi_ap_transports(agent_ip, AGENT_PORT);
+#else
+    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
+#endif
+```
 
-电脑热点（SoftAP）成立依赖「网卡硬件 + 驱动 + 固件」三者允许 AP 角色，**不是所有网卡默认支持**。
+transport 注册层由 `micro_ros_platformio` 库提供：
+
+- 构建开关 `board_microros_transport = wifi`（`platformio.ini` 主环境第 53 行、test06 第 113 行）选择 WiFi transport 实现并注入预编译 `libmicroros`；
+- STA 官方路径 `set_microros_wifi_transports`（`platform_code/arduino/wifi/micro_ros_transport.h:9-28`）：先 `WiFi.begin` 阻塞等待关联（10-14 行），再 `rmw_uros_set_custom_transport` 注册四个回调（20-27 行）；
+- UDP 收发由四个回调实现（`platform_code/arduino/wifi/micro_ros_transport.cpp`）：`platformio_transport_open` 绑本地端口（15-19 行）、`platformio_transport_write` 经 `beginPacket`/`endPacket` 发往 locator（27-42 行）、`platformio_transport_read` 轮询 `parsePacket`（44-60 行）；
+- AP 自组网路径 `set_microros_wifi_ap_transports`（`net_boot.h:32-45`）与官方函数同构：差异是它假设 AP 已由调用方开启，直接复用同一批 transport 回调注册，不调用 `WiFi.begin`（注释 `net_boot.h:25-27`）。
+
+### 1.3 上位机侧工具
+
+micro-ROS Agent 是 ROS 2 包 `micro_ros_agent`（仓库名 micro-ROS-Agent，见 `package.xml`）。单条命令启动 UDP 会话：
 
 ```bash
-# Linux：查看网卡支持的接口模式，期望出现 "AP"
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+```
+
+其中 `udp4` 指定以 UDP over IPv4 承载 XRCE 会话，`--port 8888` 与固件 `AGENT_PORT` 对齐。
+
+本地 Agent 工作区 `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws` 的 `src/` 含 `micro-ROS-Agent`、`robot_bringup`、`ros_serial2wifi`、`ydlidar_ros2` 等包。聚合启动文件 `robot_bringup/launch/bringup.launch.py` 把两条通道的进程集中声明：
+
+- micro-ROS Agent 节点（`bringup.launch.py:28-37`）：`executable="micro_ros_agent"`，`arguments=["udp4", "--port", "8888"]`；
+- 雷达桥节点（`bringup.launch.py:39-44`）：`executable="tcp_server"`，`parameters=[{"serial_port": "/tmp/tty_laser"}]`。
+
+雷达桥实现 `ros_serial2wifi/ros_serial2wifi/tcpserver.py` 声明参数 `tcp_port=8889`、`serial_port=/tmp/laserport`（17-18 行），绑定 `0.0.0.0`（27 行）并以伪终端符号链接暴露串口（31-33 行）。launch 覆盖 `serial_port` 为 `/tmp/tty_laser`。
+
+### 1.4 第 0 节概念到两侧工具的映射
+
+| 层     | 概念落点                  | 固件侧实现            | 上位机侧实现            |
+| ------ | ------------------------- | --------------------- | ----------------------- |
+| 链路层 | AP/STA 关联               | `WiFi.begin`/`softAP` | nmcli 建连接（第 3 节） |
+| 网络层 | 同子网直达（网段对齐）    | `AGENT_IP_STR` 静态值 | 热点网段/静态 IP        |
+| 传输层 | 监听 0.0.0.0 收无线口入站 | `udp_client.begin`    | Agent 默认监听所有接口  |
+| 应用层 | XRCE 语义                 | `rclc`/`rmw` 栈       | `micro_ros_agent`       |
+
+工具齐备后，第 2 节给出"按哪种拓扑连线"，第 3 节给出"怎么一步步操作"。
+
+---
+
+## 2. 当前网络拓扑方案：下位机 STA 为主、AP 备用
+
+拓扑方案与原型均出自 test06 的专门工作：`env:test06_wifi` 固件同时实现 STA 接入与 AP 自组网两条路径，用于验证本方案。方案决策与代码路径见下文。
+
+### 2.1 主备决策逻辑
+
+- 主路径（默认，`WIFI_ROLE_AP=0`）：ESP32 作 STA 接入既有的 2.4G 无线接入点。理由：部署现场通常有可用 AP；该路径沿用官方 `set_microros_wifi_transports`，与改造前完全一致，属纯增量（注释 `net_boot.h:5-6`），改动面最小。
+- 备用路径（`WIFI_ROLE_AP=1`）：ESP32 自开 SoftAP 自组网，上位机作 STA 连入。理由：STA 依赖外部基础设施存在，现场无路由/热点或须脱离一切外部设备时，主路径失效；自组网使通信闭环于两机之间。
+- 主备切换是编译期宏（`config.h:69-72` 的 `#ifndef` 支持命令行覆盖），不是运行时行为；运行时的会话中断由固件按重建周期自动恢复（见 2.4）。
+
+### 2.2 外部 AP 的形态选择：为何以电脑热点为主载体
+
+主路径的"外部 AP"有普通路由器、手机热点、电脑网卡热点三种形态：
+
+| 形态       | ESP32 能否连   | 隔离/认证卡点                | 本方案可用性       |
+| ---------- | -------------- | ---------------------------- | ------------------ |
+| 普通路由器 | 只连 2.4G SSID | portal 认证；AP 隔离多数可关 | 备选，需可控路由器 |
+| 手机热点   | 需显式落 2.4G  | 客户端隔离默认开且常无开关   | 不可作主           |
+| 电脑热点   | 需网卡支持 AP  | 网卡/驱动须支持 AP 角色      | 默认主载体         |
+
+结论：
+
+1. 手机热点默认启用二层客户端隔离（第 0 节 0.3），同网段互 ping 不通，系统层无法关，故不可作主；
+2. 电脑热点由 NetworkManager 托管，`shared` 模式固定网关 `10.42.0.1`、DHCP 分发 `10.42.0.x`，恰好等于 STA 分支 `AGENT_IP_STR=10.42.0.1`（`config.h:84`），固件零改动，Agent 与 ESP32 一跳直达；
+3. 电脑热点成立依赖"网卡硬件 + 驱动 + 固件"三者允许 AP 角色，第 3 节首次启动步骤先做能力检查。
+
+### 2.3 两拓扑网络画像
+
+| 项             | 拓扑 A（主）：STA 接入                 | 拓扑 B（备）：AP 自组网                |
+| -------------- | -------------------------------------- | -------------------------------------- |
+| `WIFI_ROLE_AP` | `0`（默认）                            | `1`（试验）                            |
+| ESP32 角色     | STA，连外部 2.4G AP                    | SoftAP，自开 2.4G                      |
+| ESP32 地址     | DHCP 租约 `10.42.0.x`（电脑热点）      | 固定 `192.168.4.1`，自带 DHCP          |
+| Agent 宿主     | 外部 AP 侧（电脑热点网关 `10.42.0.1`） | 上位机 STA，须手动静态 `192.168.4.100` |
+| `AGENT_IP_STR` | `10.42.0.1`                            | `192.168.4.100`                        |
+| 频段           | 外部 AP 落 2.4G（`band bg`）           | SoftAP 单射频即 2.4G                   |
+| 出公网         | 经热点 NAT                             | 默认无                                 |
+
+共同前提：ESP32-S3 射频前端仅支持 2.4G（802.11 b/g/n），5G 对其物理不可见（第 0 节 0.2 的一般性结论落到本硬件）；因此无论哪种拓扑，无线侧都必须落在 2.4G。
+
+### 2.4 代码路径
+
+选型只改一处宏 `WIFI_ROLE_AP`（`config.h:70-72`），地址组随宏联动（`config.h:76-85`）。固件侧分流在 `net_boot.h` 的 `wifi_role_boot`（`net_boot.h:52-69`）：
+
+```cpp
+static inline void wifi_role_boot(IPAddress& agent_ip) {
+    agent_ip.fromString(AGENT_IP_STR);
+
+#if WIFI_ROLE_AP == 1
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL);
+    Serial.printf("[WiFi] softAP \"%s\" ready, IP=%s, agent %s:%u\n", ...);
+    set_microros_wifi_ap_transports(agent_ip, AGENT_PORT);
+#else
+    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
+#endif
+}
+```
+
+- STA 分支：官方函数内 `WiFi.begin` 阻塞等待关联成功后注册 transport（`micro_ros_transport.h:10-14`）；
+- AP 分支：`WiFi.softAP` 开启后走同构纯 UDP 注册，跳过 `WiFi.begin`（`net_boot.h:32-45`）。
+
+固件任务骨架在 `src/tests/test06_wifi/main.cpp`：`setup` 中 `xTaskCreate(micro_ros_task, ...)`（75 行）；任务内 `wifi_role_boot` 只执行一次（110 行），随后进入"初始化 -> spin -> 释放 -> 重建"循环（118-208 行），任务永不返回（约束依据见注释 91-97）。`EXECUTOR_HANDLES=1`（21 行）满足 rclc"句柄容量须大于等于 1"的契约（注释 18-20）。
+
+### 2.5 局限
+
+- Agent 地址编译期已知且单一：拓扑 B 下上位机静态 IP 必须等于 `AGENT_IP_STR`，不一致时 ESP32 可达但 Agent 收不到，现象同"无会话"；
+- SoftAP 无外网上联，拓扑 B 默认不出公网；
+- 两拓扑切换需重新编译烧录（宏是编译期常量）。
+
+---
+
+## 3. 使用指导：nmcli 建网与 Agent 启动
+
+本节按拓扑 A（主，STA 接入）与拓扑 B（备，AP 自组网）分别给出完整 shell 流程。每步注释标注执行时机：`[首次启动]` 表示只在首次部署执行一次的步骤，其余为每次上电的常规步骤。
+
+共用准备（每会话一次）：
+
+```bash
+# ROS 2 环境与本地 Agent 工作区 (Jazzy)
+source /opt/ros/jazzy/setup.bash
+source ~/Documents/ROS/YuXiangROS/Chap9/Robot_ws/install/setup.bash
+
+# 确认网卡设备名 (示例 wlan0, 实际以输出为准)
+nmcli device status
+```
+
+### 3.1 拓扑 A（主）：电脑热点 + 固件 STA
+
+固件侧为默认值：`WIFI_ROLE_AP=0`、`AGENT_IP_STR="10.42.0.1"`（`config.h:70-85`），`WIFI_SSID`/`WIFI_PASS` 与热点一致（`config.h:91-92`）。
+
+上位机配置（拓扑 A）：
+
+```bash
+# [首次启动] 1. 确认网卡支持 AP 模式, 期望含 "AP"
 iw list | sed -n '/Supported interface modes/,/^$/p'
 
-# 查看 wifi 网卡设备名
-nmcli device status
+# [首次启动] 2. 创建热点连接 (band bg 锁 2.4G; channel 取 1/6/11 中不拥挤者)
+#             首次执行生成名为 Hotspot 的连接 profile, 此后不必重复本步
+nmcli device wifi hotspot ifname wlan0 ssid <"YOUR_HOTPOT_SSID"> \
+  password <"YOUR_HOTPOT_PASSWORD"> band bg channel 6
 
-# Windows 备查（需管理员）
-netsh wlan show drivers        # 看"支持的承载网络: 是"
+# [每次] 3. 开热点 (profile 已存在, 只拉起)
+nmcli connection up Hotspot
+
+# [每次] 4. 验证热点自身 IP 应为 10.42.0.1/24 (与固件 AGENT_IP_STR 对齐)
+nmcli -f IP4.ADDRESS,IP4.GATEWAY device show wlan0
 ```
 
-- 若驱动不支持，hostapd 会报 `driver doesn't support AP mode`，`nmcli` 热点起不来。
-- 驱动生态差异：Atheros `ath9k`、MediaTek `mt76`、Realtek `rtw88/rtw89` 对 AP 支持较好；**Intel `iwlwifi` 较弱/受限**，不少型号没有可靠的基础设施 AP 模式。
-- 拓扑限定：若电脑还要同时连外网（STA）又开热点（AP），还需网卡支持**并发多角色**；本项目 Agent 只需与 ESP32 直连、不依赖外网，天然只要求单角色 AP，因此该方案才是 **"最小化"** 。
-
-## 4. nmcli 常用指令
-
-### 4.1 一键开热点（2.4GHz）
+上位机启动 Agent（拓扑 A）：
 
 ```bash
-# 先确认 wifi 网卡名（通常 wlan0 / wlp2s0）
-nmcli device status
-
-# 一键开热点：band bg 锁 2.4G，channel 用 1/6/11 中不拥挤的一个
-nmcli device wifi hotspot \
-  ifname wlan0 \
-  ssid "<WIFI_SSID>" \
-  password "<WIFI_PASS>" \
-  band bg channel 6
-```
-
-说明：
-
-- 首次执行会创建一个名为 `Hotspot` 的 NetworkManager 连接，`ipv4.method` 自动为 `shared`（即 NAT 共享、网关 10.42.0.1）；
-- SSID/密码须与 `include/RobotConfig/config.h` 中 `WIFI_SSID` / `WIFI_PASS` 一致。
-
-### 4.2 手动建 profile（更可控，推荐长期方案）
-
-```bash
-nmcli connection add type wifi ifname wlan0 con-name AgentAP autoconnect no \
-  ssid "changli-Legion-Y7000-IRX9"
-nmcli connection modify AgentAP 802-11-wireless.mode ap
-nmcli connection modify AgentAP 802-11-wireless.band bg
-nmcli connection modify AgentAP 802-11-wireless.channel 6
-nmcli connection modify AgentAP wifi-sec.key-mgmt wpa-psk
-nmcli connection modify AgentAP wifi-sec.psk "<WIFI_PASS>"
-nmcli connection modify AgentAP ipv4.method shared
-nmcli connection up AgentAP
-```
-
-### 4.3 查看状态 / 修改 / 关闭
-
-```bash
-nmcli connection show --active                        # 当前活动连接
-nmcli connection show Hotspot                         # 查看某连接全部参数
-nmcli -f IP4.ADDRESS,IP4.GATEWAY device show wlan0    # 热点自身 IP，应见 10.42.0.1/24
-nmcli connection down Hotspot                         # 关闭热点（再次 up 可恢复）
-nmcli connection delete Hotspot                       # 删除 profile
-nmcli radio wifi                                      # wifi 射频开关状态
-```
-
-### 4.4 主机侧联调验证
-
-```bash
-# 终端 1：Agent 监听（绑定 0.0.0.0，收 ESP32 入站）
+# [每次] 单独启动 micro-ROS Agent (绑 0.0.0.0, 收 ESP32 无线口入站)
 ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
 
-# 终端 2：观察下位机串口，应打印 [WiFi] connected, local IP=10.42.0.x
-
-# 终端 3：话题级验证
-ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5
-ros2 topic hz /odom          # 期望约 20Hz
+# 或: 全量聚合启动 (含雷达桥 ros_serial2wifi 与 ydlidar, 见 1.3)
+# ros2 launch robot_bringup bringup.launch.py
 ```
 
-## 5. 排障速查（按层自底向上）
-
-| 现象                                  | 先查什么                      | 常用命令/手段                                                                           |
-| ------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------- |
-| ESP32 搜不到 SSID                     | **频段**（最常见：热点在 5G） | 确认 `band bg`；iPhone 热点开「最大兼容性」                                             |
-| 连上但拿不到 IP / ping 不通网关       | **网段/隔离**                 | `nmcli -f IP4.ADDRESS device show wlan0` 必须 10.42.0.1；手机热点基本无解（客户端隔离） |
-| 拿到 IP、ping 通网关，但 Agent 无会话 | **端口/防火墙/Agent 绑定**    | Agent 用 `udp4 --port 8888` 默认绑 0.0.0.0；有防火墙放行 8888/8889                      |
-| Agent 能看到客户端但数据断            | **同频干扰/信号**             | 2.4G 换信道（1/6/11）；SSID 同名设备冲突                                                |
-| 热点根本起不来                        | **网卡无 AP 能力**            | `iw list` 看是否含 AP；换网卡/换驱动                                                    |
-| 连上后一会儿就掉                      | **固件重连/时间同步**         | 看下位机串口 `[WiFi]`/`[BRIDGE]` 重连日志                                               |
-
-## 6. Windows 侧备查（若在 Windows 上开热点）
-
-```bat
-netsh wlan show drivers          :: 看"支持的承载网络"
-:: 承载网络模式（旧方案，驱动不支持则失败）
-netsh wlan set hostednetwork mode=allow ssid=xxx key=yyy
-netsh wlan start hostednetwork
-```
-
-新版本更推荐用系统「移动热点」GUI（同样依赖驱动 SoftAP 支持，默认网段常为 192.168.137.1，**与固件 10.42.0.1 不符，需改 `AGENT_IP_STR` 重编译或改用 Linux**）。
-
-## 7. 关键结论备忘
-
-1. ESP32-S3 只认 2.4GHz → 一切形态的第一步是"把 AP 逼到 2.4G"；
-2. 手机热点"设备互访被禁"是系统级行为，网段对不上只是次要问题；
-3. 电脑热点最小化成立的三前提：**热点落 2.4G + 网卡支持 AP + 拓扑只要求单角色 AP**；
-4. NetworkManager 热点默认 10.42.0.1/24 与固件 `AGENT_IP_STR` 天然对齐，这是当前方案能"零改固件"的根本原因。
-
----
-
-## 8. 固件网络拓扑与接入契约（STA 接入 / AP 自组网）
-
-> 对应代码：`include/NetBoot/net_boot.h`（网络自举入口）、`include/RobotConfig/config.h`（拓扑开关与参数）。
-> 第 2 节从"上位机侧怎么建网"出发；本节从"固件侧支持哪两种网络形态、各自契约是什么"出发，两者互补。
-
-### 8.1 两种拓扑总览
-
-固件通过编译期宏 `WIFI_ROLE_AP` 在两种拓扑间切换，`config.h` 中默认 `0`（可用命令行 `-DWIFI_ROLE_AP=1` 覆盖，便于不改文件做试验）：
-
-| 维度         | STA 接入（默认，`WIFI_ROLE_AP=0`）                      | AP 自组网（`WIFI_ROLE_AP=1`，试验）                       |
-| ------------ | ------------------------------------------------------- | --------------------------------------------------------- |
-| ESP32 角色   | STA，接入外部 AP                                        | 自身开 2.4G SoftAP，兼任 AP + DHCP server                 |
-| 上位机角色   | AP 宿主（电脑热点/路由器/手机热点）                     | STA，手动配静态 IP                                        |
-| 网段         | 取决于外部 AP；电脑热点默认 `10.42.0.0/24`              | ESP32 固定 `192.168.4.0/24`，自身 `192.168.4.1`           |
-| Agent 地址   | 固件固定 `AGENT_IP_STR`（电脑热点场景为 `10.42.0.1`）   | 固件固定 `AGENT_IP_STR` 为 `192.168.4.100`                |
-| 固件建网方式 | `WiFi.begin` 阻塞等 STA 连接，再注册官方 wifi transport | 不发起 `WiFi.begin`，直接注册纯 UDP transport（复用回调） |
-| 适用场景     | 有外部 AP/热点的室内常规联调                            | 户外、无路由、快速双机验证                                |
-| 外网访问     | 经外部 AP 上联口（NAT）                                 | 无（仅局域网内互通，除非上位机额外开转发）                |
-
-两种形态下 transport 回调（open/write/read）完全相同，与 AP/STA 角色无关，故 AP 模式只需"跳过一次 `WiFi.begin`"即可复用同一套 micro-ROS 传输栈。
-
-### 8.2 STA 接入（默认路径）
-
-- 链路：`wifi_role_boot` 解析 `AGENT_IP_STR` → `set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT)` 内部完成 `WiFi.begin` 阻塞连接并注册 transport。
-- 网络侧配置见第 2、4、5 节（电脑热点方案网段与固件天然对齐，零改固件）。
-
-### 8.3 AP 自组网（`WIFI_ROLE_AP=1`）
-
-设计动机：联调环境可能没有可用的外部 AP（路由器被占用、手机热点隔离不可关、户外无网）。让 ESP32 自开 SoftAP，上位机作为 STA 连入，形成最小局域网。
-
-网络契约（`net_boot.h` 头部注释）：
-
-- ESP32 SoftAP 自身固定 `192.168.4.1`（Arduino-ESP32 SoftAP 默认网段），自带 DHCP server，给上位机分配 `192.168.4.x`。
-- 上位机（Agent 宿主）必须手动配静态 IP `192.168.4.100`：Agent 地址编译期写死在固件 `AGENT_IP_STR`，无法运行期动态发现，故上位机 IP 必须落在编译期已知值上。
-- SSID / WPA2 密码 / 信道由 `WIFI_AP_SSID` / `WIFI_AP_PASS` / `WIFI_AP_CHANNEL` 给定（`config.h`，信道默认 6，属 2.4G 不重叠集 1/6/11）。
-
-transport 注册要点（`set_microros_wifi_ap_transports`）：
-
-- 与官方 `set_microros_wifi_transports` 同构，差异仅在后者先 `WiFi.begin` 阻塞等 STA 连接，本函数假设 SoftAP 已由调用方开启。
-- 通过 `rmw_uros_set_custom_transport` 注册，复用 `platformio_transport_*` 回调，会话建立逻辑（第 9 节生命周期）完全一致。
-
-上位机侧静态 IP 配置（Linux + NetworkManager 示例，网卡名以实际为准）：
+下位机（拓扑 A）：
 
 ```bash
-nmcli connection add type wifi ifname <wifi_dev> con-name AgentSTA autoconnect yes \
-  ssid "<WIFI_AP_SSID>"
+# [首次启动] 确认 config.h 为 STA 分支 (默认即此), 编译烧录
+pio run -e test06_wifi -t upload
+```
+
+### 3.2 拓扑 B（备）：固件 AP 自组网 + 上位机 STA
+
+固件侧：`WIFI_ROLE_AP=1`、`AGENT_IP_STR="192.168.4.100"`、`WIFI_AP_SSID="fishbot-ap"`、`WIFI_AP_PASS="fishbot123"`、`WIFI_AP_CHANNEL=6`（`config.h:76-81`）。ESP32 自开 SoftAP（自身 `192.168.4.1` 并内置 DHCP）。
+
+关键点（对应本节最重要的特殊步骤）：上位机**连入热点之前**必须预先建好 profile 并配静态 IP。原因：Agent 地址 `192.168.4.100` 是编译进固件的常量，若上位机走 DHCP，SoftAP 会从 `.2` 起分配地址，固件发往 `.100` 的包无人接收，表现为"连上了但无会话"。故静态 IP 必须等于 `AGENT_IP_STR`。
+
+上位机配置（拓扑 B）：
+
+```bash
+# [首次启动] 1. 连下位机热点之前: 建 STA profile
+#             autoconnect no: 备用拓扑手动拉起, 避免开机抢连
+nmcli connection add type wifi ifname wlan0 con-name AgentSTA \
+  autoconnect no ssid "fishbot-ap"
+
+# [首次启动] 2. WPA2 凭据 (须与 config.h WIFI_AP_PASS 一致)
 nmcli connection modify AgentSTA wifi-sec.key-mgmt wpa-psk
-nmcli connection modify AgentSTA wifi-sec.psk "<WIFI_AP_PASS>"
-nmcli connection modify AgentSTA ipv4.method manual ipv4.addresses 192.168.4.100/24
+nmcli connection modify AgentSTA wifi-sec.psk "fishbot123"
+
+# [首次启动] 3. 静态 IP 192.168.4.100/24, 必须等于固件 AGENT_IP_STR
+nmcli connection modify AgentSTA ipv4.method manual \
+  ipv4.addresses 192.168.4.100/24
+
+# [首次启动] 4. 上述 1-3 完成后才首次连入 (本步也是 [每次] 的拉起命令)
 nmcli connection up AgentSTA
 ```
 
-局限与前提：
+上位机启动 Agent（拓扑 B，命令同拓扑 A，本机 IP 现为 `192.168.4.100`）：
 
-- 仅支持编译期已知的单个 Agent 地址；上位机静态 IP 与固件 `AGENT_IP_STR` 不一致时，ESP32 可达但 Agent 收不到（包发往 `.100` 而实际地址不同），现象同"无会话"。
-- SoftAP 单射频即 2.4G，ESP32-S3 硬件本就只支持 2.4G，无频段问题；同一 2.4G 频谱的干扰/信道排障规则沿用第 5 节。
-- 上位机若同时要访问外网，需另开 NAT/转发（本拓扑默认不出网）。
+```bash
+# [每次] 拉起备用连接 (profile 已存在, 免去 1-3)
+nmcli connection up AgentSTA
 
-### 8.4 固件代码映射与参数入口
+# [每次] 验证: 本机 IP 应为 192.168.4.100, 且能 ping 通 ESP32 网关
+ip addr show wlan0
+ping -c 3 192.168.4.1
 
-| 代码位置                                                       | 作用                                                                           |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `net_boot.h` `wifi_role_boot`                                  | 解析 `AGENT_IP_STR` 到 `IPAddress`，按 `WIFI_ROLE_AP` 分支建网并注册 transport |
-| `net_boot.h` `set_microros_wifi_ap_transports`                 | AP 模式专用：纯 UDP transport 注册（不 `WiFi.begin`）                          |
-| `config.h` `WIFI_ROLE_AP`                                      | 拓扑开关，`#ifndef` 包裹以支持 `-D` 覆盖                                       |
-| `config.h` `AGENT_IP_STR` / `AGENT_PORT`                       | Agent 地址与 UDP 端口（两拓扑各有一组注释说明）                                |
-| `config.h` `WIFI_SSID` / `WIFI_PASS`                           | STA 模式凭据（须为非 const 可写数组，接口要求 `char*`）                        |
-| `config.h` `WIFI_AP_SSID` / `WIFI_AP_PASS` / `WIFI_AP_CHANNEL` | AP 模式广播参数                                                                |
+# [每次] 启动 Agent
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+```
+
+下位机（拓扑 B）：
+
+```bash
+# [首次启动] 方式一: 直接编辑 config.h, 把 WIFI_ROLE_AP 置 1 后编译烧录
+# [首次启动] 方式二: 不改文件, 用环境变量注入宏 (对应 config.h:69 的 #ifndef)
+PLATFORMIO_BUILD_FLAGS="-DWIFI_ROLE_AP=1" pio run -e test06_wifi -t upload
+```
+
+### 3.3 联调验证
+
+以 test06 为验证对象时，固件不发布话题，验证看串口日志：
+
+```text
+[WiFi] softAP "fishbot-ap" ready, IP=192.168.4.1, agent 192.168.4.100:8888   (拓扑 B)
+[WiFi] connected, local IP=10.42.0.x                                          (拓扑 A)
+[micro_ros] node "fishbot_motion_control" ready, spinning
+```
+
+若换烧发布/订阅型固件（主固件、test13），做话题级验证：
+
+```bash
+ros2 topic hz /odom          # 主固件: 期望约 20 Hz
+ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # test13
+```
+
+### 3.4 排障速查（操作级，按层自底向上）
+
+| 现象                     | 先查什么          | 常用命令/手段                             |
+| ------------------------ | ----------------- | ----------------------------------------- |
+| 搜不到 SSID              | 频段（热点在 5G） | 确认 `band bg`；iPhone 开最大兼容性       |
+| 拿不到 IP、ping 不通网关 | 网段/隔离         | 查 `IP4.ADDRESS`；拓扑 B 查静态 IP        |
+| ping 通但 Agent 无会话   | 端口/地址对齐     | `AGENT_IP_STR` 是否等于本机 IP；放行 8888 |
+| 有客户端但数据断         | 同频干扰/信号     | 换信道 1/6/11；查同名 SSID                |
+| 热点起不来               | 网卡无 AP 能力    | `iw list` 查 AP；换网卡                   |
+
+研发级根因取证（如第 4 节的 AP 崩溃）在源码层排障，不在本表范围。
 
 ---
 
-## 9. micro-ROS 会话生命周期与故障处理
+## 4. 排障记录：AP 模式首版周期性复位
 
-> 本固件的 micro-ROS 网络会话采用"初始化 -> spin -> 释放 -> 重建"的完整生命周期模型，能自愈两类常见故障（Agent 启动晚于固件、运行中会话断开）。
-> 以下根因结论均引述本地编译内嵌的 rclc 源码（路径 `lib/micro_ros_platformio/build/mcu/src/rclc/rclc/src/rclc/`），并以函数与行号标注，可自行复核。
+本故障发生于拓扑 B（AP 备用分支，第 2 节）的首版实现：提交 `eb9a540` 引入 STA/AP 双模自举，`67a314b` 修复。修复后的参考实现即当前 `src/tests/test06_wifi/main.cpp`。以下取证全部来自本仓库内嵌库源码、git 历史与本地编译产物。
 
-### 9.1 会话生命周期模型
+### 4.1 症状
 
-micro-ROS 对象按依赖序初始化，失败/断开时逆序释放：
+AP 模式（`WIFI_ROLE_AP=1`）下，串口周期性打印 UDP 发送失败，随后复位，与是否连接 Agent 无关：
 
 ```text
-初始化:  rclc_support_init(support)  ->  rclc_node_init_default(node)
-         ->  rclc_executor_init(executor)
-释放:    rclc_executor_fini  ->  rcl_node_fini  ->  rclc_support_fini   (严格逆序)
+[WiFi] softAP "fishbot-ap" ready, IP=192.168.4.1, agent 192.168.4.100:8888
+endPacket(): could not send data: 12
+...
+endPacket(): could not send data: 12
+Guru Meditation Error: IllegalInstruction
+PC     : 0x42002da8
+Backtrace: 0x42002da5
 ```
 
-- 初始化链任一步失败：释放该步之前已成功的对象，延时 `RECONNECT_INTERVAL_MS` 后整体重来；
-- spin 期间会话失效：`rclc_executor_spin_some` 返回错误，break 后走同一套逆序释放并重建；
-- 任务函数永不返回。原因：`xTaskCreate` 创建的任务函数一旦 return，FreeRTOS 调度器从已失效的任务栈指针继续取指，表现为 PC 奇数不对齐、`IllegalInstruction` 复位。故失败路径只允许"延时重试"，不允许越过函数尾。
+`endPacket(): could not send data: 12` 约每 2 秒一次，持续约 11.2 秒后触发 `IllegalInstruction`，复位后重复同一周期。
 
-运行期轮询采用 `rclc_executor_spin_some`（单次限时 10 ms）而非 `rclc_executor_spin`：本固件未注册订阅/定时器句柄，等待集为空时 `rcl_wait` 立即返回，`spin` 会退化为无休眠忙循环独占 core0；`spin_some` 返回后显式 `delay(1)` 让出 CPU。仅当 Agent 会话失效（context 无效）时返回错误，正常超时返回 `RCL_RET_TIMEOUT` 需放行。
+### 4.2 复现与 bug 版本代码
 
-### 9.2 两类典型故障与根因
+用 `git worktree` 隔离出问题提交 `eb9a540`，本地编译生成 ELF 供反汇编：
 
-#### 9.2.1 Agent 启动晚于固件（固件先跑）
+```bash
+git worktree add /tmp/fishbot_bug_eb9a540 eb9a540
+cd /tmp/fishbot_bug_eb9a540
+cp config.example.h include/RobotConfig/config.h
+sed -i 's/#define WIFI_ROLE_AP 0/#define WIFI_ROLE_AP 1/' include/RobotConfig/config.h
+pio run -e test06_wifi
+```
 
-现象：串口循环打印 `[micro_ros] support init failed (<code>), agent unreachable`，间隔约 `RECONNECT_INTERVAL_MS`。
+该版本 `micro_ros_task` 的关键代码（`git show eb9a540:src/tests/test06_wifi/main.cpp`）：
 
-根因：`rclc_support_init` 内部调用 `rcl_init`（`init.c:70`），其 rmw 层需与 Agent 建立 XRCE 会话；Agent 不可达时 `rcl_init` 返回错误并向上传播，support 初始化即失败。此时固件尚未创建任何可用对象（`init.c:69` 已先把 context 重置为零初始化值），失败分支不调用 fini，直接延时重试。
+```cpp
+constexpr uint8_t EXECUTOR_HANDLES = 0;   // 句柄容量为 0
 
-处理：该分支天然实现"等 Agent 上线后自动建链"，无需人工干预；Agent 先启动时不会走到此分支。
+// 三处初始化返回值均不检查
+rclc_support_init(&support, 0, NULL, &allocator);
+rclc_node_init_default(&node, NODE_NAME, "", &support);
+unsigned int num_handles = EXECUTOR_HANDLES;
+rclc_executor_init(&executor, &support.context, num_handles, &allocator);
 
-#### 9.2.2 运行中会话断开（Agent 掉线或重启）
+rclc_executor_spin(&executor);   // 末尾直接 spin, 函数体随后 return
+```
 
-现象：串口打印 `[micro_ros] spin_some failed (<code>), agent session lost`，随后按重建节奏恢复，话题数据重新流动。
+### 4.3 反汇编取证
 
-根因：`rclc_executor_spin_some` 入口校验上下文有效性（`executor.c:1808-1811`）：
+对 `firmware.elf` 反汇编，`micro_ros_task`（符号 `_ZN12_GLOBAL__N_114micro_ros_taskEPv`）起址 `0x42002e50`，函数体长度 `0x17e`。其尾部调用序列：
+
+```text
+42002f6e  call8  4206ad90 <rclc_support_init>
+42002f7f  call8  4206af1c <rclc_node_init_default>
+42002f91  call8  4206a7f8 <rclc_executor_init>
+42002f99  call8  4206ad3c <rclc_executor_spin>
+42002fcc  retw.n
+```
+
+三点证据：
+
+1. 四个调用之间没有对返回值的分支判断，`rclc_executor_spin` 之后直接 `retw.n`，即任务函数在 spin 返回后立即越过函数尾返回；
+2. `rclc_executor_init` 调用前 `a12` 被赋 `0`（`movi.n a12, 0`），对应 `EXECUTOR_HANDLES=0`；
+3. 崩溃地址 `0x42002da8` 与回溯地址 `0x42002da5` 均低于 `micro_ros_task` 起址 `0x42002e50`，落在 `.flash.text` 段内 `_stext` 之后的常量池区域（该处反汇编显示数据字 `24 c8 03 60` 而非指令）；且 `0x42002da5` 为奇数，Xtensa 指令须 2 字节对齐，奇数取指即触发 `IllegalInstruction`。
+
+结论：崩溃 PC 指向数据区而非代码区，符合"从失效任务栈取指"的机制。
+
+### 4.4 根因链（结合 rclc/rmw 源码）
+
+第一步，support 初始化失败但未检查。`rclc_support_init` 转调 `rclc_support_init_with_options`，其内部 `rcl_init` 失败即带错误码返回（内嵌 `rclc/.../init.c:69-74`）：
+
+```c
+support->context = rcl_get_zero_initialized_context();
+rc = rcl_init(argc, argv, init_options, &support->context);
+if (rc != RCL_RET_OK) {
+  PRINT_RCLC_ERROR(rclc_init, rcl_init);
+  return rc;
+}
+```
+
+AP 模式下 Agent 不可达，`rcl_init` 经 rmw 层建 XRCE 会话失败，返回错误；bug 版本不检查，继续执行。
+
+第二步，节点初始化路径内阻塞重试发送。`rclc_node_init_default` 内部经 `rmw_create_node` 调静态函数 `create_node`，其中 `run_xrce_session` 在 Agent 不可达时阻塞重试（内嵌 `rmw-microxrcedds/.../rmw_node.c:108-110`）：
+
+```c
+if (!run_xrce_session(
+    custom_node->context, custom_node->context->creation_stream, participant_req,
+    custom_node->context->creation_timeout))
+```
+
+`run_xrce_session` 每次发送经 `platformio_transport_write`（`micro_ros_transport.cpp:27-42`）调用 `udp_client.endPacket()`，其底层 `sendto` 失败后由 Arduino core `WiFiUdp.cpp:183-187` 打印 `could not send data: %d`（errno 12）。这正是症状中周期性日志的来源。
+
+第三步，executor 初始化直接返回且未清零。`rclc_executor_init`（内嵌 `rclc/.../executor.c:108-111`）：
+
+```c
+if (number_of_handles == 0) {
+  RCL_SET_ERROR_MSG("number_of_handles is 0. Must be larger or equal to 1");
+  return RCL_RET_INVALID_ARGUMENT;
+}
+```
+
+该返回发生在 `executor.c:114` 的整体清零赋值之前，故 `EXECUTOR_HANDLES=0` 时 executor 保持零初始化，其 `context` 字段为 NULL。
+
+第四步，spin 因 context 无效立即返回。`rclc_executor_spin_some`（`executor.c:1808-1811`）：
 
 ```c
 if (!rcl_context_is_valid(executor->context)) {
@@ -398,40 +558,30 @@ if (!rcl_context_is_valid(executor->context)) {
 }
 ```
 
-rmw 层通过周期性 ping 维护会话，Agent 掉线超时后 context 被判无效，下一次 `spin_some` 即返回 `RCL_RET_ERROR`。固件据此跳出 spin 层进入重建；Agent 侧重启后无需任何操作，固件自动重新建链。
+而 `rclc_executor_spin`（`executor.c:1982-1987`）是 `while(true)` 调 `spin_some`，遇到非 OK/非 TIMEOUT 返回值即 return：
 
-### 9.3 重建可行性与实现约束（rclc 契约）
-
-生命周期可安全重建的前提是 rclc 对"重复 init / 重复 fini"的幂等保证，逐条引述：
-
-| 约束                           | 源码依据                                                                                                                                  | 结论                                                                     |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| 执行器句柄容量必须 ≥ 1         | `executor.c:108-111`：`number_of_handles == 0` 时直接 `return RCL_RET_INVALID_ARGUMENT`，且该 return 发生在 `executor.c:114` 整体清零之前 | 无句柄固件也须传最小合法值 1，否则 executor 初始化必然失败且不落任何状态 |
-| 重复 `rclc_executor_init` 安全 | `executor.c:114`：每次 init 先 `(*executor) = rclc_executor_get_zero_initialized_executor();` 整体重置                                    | 半初始化/残留状态被清零覆盖，重建无需新建对象，可复用 static 实例        |
-| 重复 `rclc_support_init` 安全  | `init.c:69`：每次 init 先 `support->context = rcl_get_zero_initialized_context();`                                                        | 失败后的 context 残留被重置，下轮 init 从干净状态开始                    |
-| `rclc_executor_fini` 幂等      | `executor.c:199-201`：对无效 executor 走空分支，注释明确 "Repeated calls to fini or calling fini on a zero initialized executor is ok"    | 释放路径可安全重复执行                                                   |
-| 失败分支不 fini 半初始化对象   | `executor.c:108-111` / `:126-129` 的失败点均不持有需手动释放的堆内存                                                                      | 直接交给下轮整体重置兜底；只有"完整初始化成功"的对象才进释放路径         |
-
-释放顺序与初始化严格逆序，且每步 fini 返回值以 `(void)` 消费（fini 失败无补救动作）。
-
-### 9.4 实现要点速查
-
-- 参考实现：`src/tests/test06_wifi/main.cpp` 的 `micro_ros_task` 函数（上述模型在该测试固件的落地，可直接移植到主固件/演进固件）。
-- 相关参数（`config.h`）：`MICRO_ROS_STACK_SIZE` / `MICRO_ROS_TASK_PRIO`（任务资源）、`TRANSPORT_SETUP_MS`（网络自举后等待时间）、`RECONNECT_INTERVAL_MS`（重建重试间隔）、`ODOM_PUBLISH_MS`（发布周期，若发布话题）。
-- 诊断口径：以串口 `[micro_ros]` 前缀日志为准，三类日志分别对应"support 失败 / node 失败 / executor 失败 / spin 会话丢失"。
-- 若在 Agent 先启动的正常联调中观察不到重建日志，说明未发生故障，生命周期静默维持。
-
-### 9.5 验证方法
-
-```bash
-# 终端 1：先启动 Agent
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
-
-# 终端 2：后给 ESP32 上电，观察串口应一次进入 "ready, spinning"，无失败日志
-
-# 故障注入：Ctrl-C 停掉 Agent 约数秒再重启
-# 期望：串口出现一次 spin_some failed + 重建日志，话题随后恢复
-ros2 topic hz /odom
+```c
+while (true) {
+  ret = rclc_executor_spin_some(executor, executor->timeout_ns);
+  if (!((ret == RCL_RET_OK) || (ret == RCL_RET_TIMEOUT))) {
+    RCL_SET_ERROR_MSG("rclc_executor_spin_some error");
+    return ret;
+  }
+}
 ```
 
-> 引述版本说明：rclc 源码行号以当前工作区 `lib/micro_ros_platformio/build/mcu/src/rclc/rclc/src/rclc/` 内嵌副本为准（该副本即编译实际使用的版本）。
+于是 `rclc_executor_spin` 立即返回，`micro_ros_task` 越过函数尾（反汇编中的 `retw.n`）。任务函数 return 后，FreeRTOS 调度器从已失效的任务栈指针继续取指，PC 落入常量池数据区（`0x42002da8`），回溯地址 `0x42002da5` 奇数不对齐，触发 `IllegalInstruction`，复位后重复同一路径，形成约 11.2 秒周期的复位。
+
+### 4.5 修复与结论
+
+修复提交（`67a314b`）将 `EXECUTOR_HANDLES` 改为最小合法值 1，并为四步初始化补全返回值检查、逆序释放、`spin_some` 加 `delay` 的生命周期模型（当前 `src/tests/test06_wifi/main.cpp:118-208`），任务函数永不 return。
+
+结论：
+
+1. 崩溃根因是"初始化返回值不检查 + 句柄容量为 0"两处叠加：对象未就绪时任务函数越过函数尾返回，触发 FreeRTOS 失效栈取指；
+2. `endPacket(): could not send data: 12` 是伴随症状而非根因，由 `run_xrce_session` 在 Agent 不可达时阻塞重试发送所致，与是否连接 Agent 无关；
+3. `xTaskCreate` 任务函数永不 return 是基本约束，失败路径只能延时重建，不能越过函数尾。
+
+---
+
+> 引述版本说明：rclc 源码行号以工作区 `lib/micro_ros_platformio/build/mcu/src/rclc/rclc/src/rclc/` 内嵌副本为准；rmw 源码行号以 `lib/micro_ros_platformio/build/mcu/src/rmw-microxrcedds/` 内嵌副本为准；Arduino core `WiFiUdp.cpp` 以 PlatformIO 包 `framework-arduinoespressif32` 为准；雷达桥与 Agent 引述以 `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws/src/` 下对应包源码为准；反汇编产物为 bug 提交 `eb9a540` 的本地编译 ELF。
