@@ -380,8 +380,14 @@ void control_step() {
 /**
  * @brief 平衡控制任务 (core1, 5ms 固定节拍)
  *
- * 用 millis 绝对时刻补足节拍, 控制周期超时时丢弃补偿 (与 test12 一致),
- * 避免追赶式调度引入相位漂移。
+ * 用 millis 绝对时刻补足节拍, 不沿用 test10/11/12 的 vTaskDelayUntil 骨架:
+ * micro-ROS executor 与 WiFi 协议栈处理的临界区/中断可延迟 balance_task 的 tick 唤醒超过一个节拍 (控制周期超时)。
+ * vTaskDelayUntil 超时后把唤醒锚点重写到理论时刻 (其实现为 *pxPreviousWakeTime = xTimeToWake), 会连续补跑 control_step 直至相位追平; 
+ * 无线链路抖动时追赶式补跑放大控制输出突变。
+ *
+ * 关键鲁棒行为在函数体 else 分支 (wait_ms <= 0 时):
+ *     next_time_ms = millis() + BALANCE_PERIOD_MS;
+ * 该句丢弃超时积压并重锚到当前时刻, 只损失一拍相位, 不产生追赶补跑。
  */
 void balance_task(void* param) {
     (void)param;

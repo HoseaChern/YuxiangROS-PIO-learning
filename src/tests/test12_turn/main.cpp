@@ -373,23 +373,24 @@ void control_step() {
 }
 
 /**
- * @brief 控制任务主体: 5ms 固定节拍调用 control_step
+ * @brief 串级 + 转向控制任务: 定时调度器, 每 BALANCE_PERIOD_MS (见 config.h) 调用一次 control_step
  *
- * 参数在 setup 中经 xTaskCreatePinnedToCore 传入 (见 config.h BALANCE_* 常量)。
+ * 任务与 control_step 的关系: balance_task 只负责"定时唤起", 每个固定节拍唤醒后调一次
+ * control_step 执行完整控制链路 (读 IMU + 测速 -> 共模串级 + 差模转向 -> 输出); 本任务钉在 core1, 避开 core0 的 WiFi 抖动。
+ *
+ * @param param 未使用 (xTaskCreatePinnedToCore 固定参数)
  */
 void balance_task(void* param) {
     (void)param; // 任务参数未使用
-
-    const uint32_t period_ms = BALANCE_PERIOD_MS; // 控制周期 (5ms)
-    uint32_t last_wake_ms = millis();
-
-    while (true) {
-        control_step();                                   // 执行一周期控制
-        const uint32_t elapsed = millis() - last_wake_ms; // 本周期已耗时
-        if (elapsed < period_ms) {
-            vTaskDelay(pdMS_TO_TICKS(period_ms - elapsed)); // 补足剩余时间, 保持固定节拍
-        }
-        last_wake_ms = millis();
+    // xTaskGetTickCount(): 无参数, 返回调度器启动以来累计的 tick 数, 用作"当前时刻"基准
+    TickType_t last_wake = xTaskGetTickCount();
+    for (;;) {
+        // vTaskDelayUntil 参数依次为: 上次唤醒时刻指针, 延时 tick 数
+        // pdMS_TO_TICKS 参数: 毫秒值 (BALANCE_PERIOD_MS=5), 返回换算后的 tick 数 (5ms -> 5 tick)
+        // vTaskDelayUntil 执行"绝对"延时: 锚定到"上一唤醒时刻 + 延时"这个绝对时间点, 自带last_wake更新,
+        //                   不受本周期执行耗时影响, 从而让控制节拍稳定不漂移 (区别于 vTaskDelay 相对延时)。
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(BALANCE_PERIOD_MS));
+        control_step(); // 唤醒后执行一个完整控制周期 (读 IMU + 测速 -> 共模串级 + 差模转向 -> 输出)
     }
 }
 

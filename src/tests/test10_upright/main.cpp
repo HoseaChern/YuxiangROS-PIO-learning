@@ -241,6 +241,7 @@ void control_step() {
  * @param param 未使用 (xTaskCreatePinnedToCore 固定参数)
  */
 void balance_task(void* param) {
+    (void)param; // 任务参数未使用
     // xTaskGetTickCount(): 无参数, 返回调度器启动以来累计的 tick 数, 用作"当前时刻"基准
     TickType_t last_wake = xTaskGetTickCount();
     for (;;) {
