@@ -15,8 +15,8 @@
  *   - micro-ROS 任务/发布/时间同步参数
  *   - 话题名与节点名
  *
- * 不收纳: 按各固件 micro-ROS 订阅/定时器数量取值的常量
- * (EXECUTOR_HANDLES 在 main=2 / test06=0 / test07=1), 保留在各固件本地定义。
+ * 不收纳: EXECUTOR_HANDLES 等按各固件 micro-ROS 订阅/定时器数量取值的常量, 保留在各固件本地定义
+ * (main=2 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1)。
  */
 #ifndef ROBOTCONFIG_H
 #define ROBOTCONFIG_H
@@ -108,6 +108,7 @@ char WIFI_PASS[] = "YOUR_WIFI_PASSWORD";
 constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间, 单位 ms
+constexpr uint32_t RECONNECT_INTERVAL_MS = 2000; // micro-ROS 会话重建间隔: agent 不可达/会话断开后延时重试, 单位 ms (test06_wifi 用)
 constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单位 ms
 constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长, 单位 ms
 constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, 单位 ms

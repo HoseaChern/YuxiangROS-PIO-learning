@@ -68,18 +68,4 @@ static inline void wifi_role_boot(IPAddress& agent_ip) {
 #endif
 }
 
-/**
- * @brief 网络就绪查询: 供依赖网络可用的非 micro-ROS 任务 (如透传) 使用
- *
- * AP 模式下 softAP 已由 wifi_role_boot 开启即视为就绪 (WiFi.status() 仅反映 STA
- * 连接状态, 在 AP 模式恒非 WL_CONNECTED); STA 模式需已连接外部 AP。
- */
-static inline bool wifi_ready() {
-#if WIFI_ROLE_AP == 1
-    return true;
-#else
-    return WiFi.status() == WL_CONNECTED;
-#endif
-}
-
 #endif // NET_BOOT_H
