@@ -135,7 +135,7 @@ buildable projects, one-to-one:
   compilation).
 - **Config & credential separation**: shared compile-time constants (pins,
   calibration, WiFi credentials, Agent IP/port, etc.) live in
-  `lib/RobotConfig/config.h` (local copy, not in the repo); the template is
+  `include/RobotConfig/config.h` (local copy, not in the repo); the template is
   `config.example.h`. Hardware/deployment changes never dirty the git worktree.
 
 ```ini
@@ -159,12 +159,13 @@ build_src_filter = +<examples/example01_helloworld>
 
 ```text
 YuxiangROS-PIO-learning/
-├── include/                     # project headers (reserved)
-├── lib/                         # libraries (private + localized third-party)
+├── include/                     # project headers (header-only, grouped by function)
+│   ├── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
+│   ├── RobotConfig/             # shared compile-time config (config.example.h template + docs)
+│   └── NetBoot/                 # network bootstrap (net_boot.h: STA/AP dual-mode + transport registration)
+├── lib/                         # libraries (private algorithm + localized third-party)
 │   ├── Kinematics/              # two-wheel differential kinematics (fwd/inv + odom), pure algorithm
 │   ├── PIDController/           # positional PID, pure algorithm
-│   ├── RobotConfig/             # shared compile-time config + network bootstrap (config.example.h, net_boot.h, docs)
-│   ├── SemanticEnums/           # semantic enums (MotorID / VelocityID, etc.)
 │   ├── Esp32McpwmMotor/         # 3rd-party: MCPWM motor driver (git-ignored)
 │   ├── Esp32PcntEncoder/        # 3rd-party: PCNT encoder reading (git-ignored)
 │   ├── MPU6050_light/           # 3rd-party: IMU attitude estimation (git-ignored)
@@ -201,7 +202,7 @@ whole); the Source column is for upstream tracking only:
 
 ```bash
 # prepare configuration (copy the template, fill in WiFi credentials, adjust for your hardware/deployment)
-cp lib/RobotConfig/config.example.h lib/RobotConfig/config.h
+cp include/RobotConfig/config.example.h include/RobotConfig/config.h
 
 # build / upload the main firmware
 pio run -e esp32-s3-devkitc-1
@@ -235,8 +236,8 @@ pio run -e test01_motor -t upload
 
 ## Running and Integration
 
-1. fill in the WiFi credentials in `lib/RobotConfig/config.h`;
-2. set `AGENT_IP_STR` in `lib/RobotConfig/config.h` to the host running the micro-ROS Agent;
+1. fill in the WiFi credentials in `include/RobotConfig/config.h`;
+2. set `AGENT_IP_STR` in `include/RobotConfig/config.h` to the host running the micro-ROS Agent;
 3. after flashing, start the micro-ROS Agent on the host:
 
    ```bash
@@ -351,10 +352,12 @@ Key points:
 - prefix the relative compiler name `xtensa-esp32s3-elf-` with the absolute path
   using `startswith` only; do not use `sed` for global replacement (the name also
   appears inside absolute paths, producing `bin//home` double prefixes);
-- `tools/merge_ccdb.py` appends the missing `-I` for the header-only library
-  `lib/SemanticEnums` to every command: PIO's `-t compiledb` drops include paths
-  of header-only libraries (no `.cpp`), so the real build command carries it but
-  the ccdb does not, which makes clangd report `'SemanticEnums.h' file not found`;
+- `tools/merge_ccdb.py` appends the missing `-I` for the header-only
+  subdirectories `include/SemanticEnums`, `include/RobotConfig`, `include/NetBoot`
+  to every command: PIO's `-t compiledb` injects only `-I include` (the top level,
+  no subdirectories); sources reference these headers by short names
+  (`SemanticEnums.h` / `config.h` / `net_boot.h`), so without the subdirectory
+  `-I` clangd reports `'SemanticEnums.h' file not found`;
 - re-run after adding/removing environments.
 
 Common problems:

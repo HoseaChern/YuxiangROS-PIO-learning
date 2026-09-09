@@ -2,7 +2,7 @@
 .pio/
 .vscode/
 
-lib/RobotConfig/config.h
+include/RobotConfig/config.h
 
 # 第三方库集中存放
 lib/Esp32McpwmMotor/

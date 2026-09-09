@@ -2,7 +2,7 @@
 
 > 整理日期：2026-09-06
 > 适用平台：Ubuntu 24.04 + NetworkManager（Windows 仅附备查）
-> 固件侧参数入口：`lib/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_SSID`/`WIFI_PASS`）。
+> 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_SSID`/`WIFI_PASS`）。
 
 ---
 
@@ -212,7 +212,7 @@ nmcli device wifi hotspot \
 说明：
 
 - 首次执行会创建一个名为 `Hotspot` 的 NetworkManager 连接，`ipv4.method` 自动为 `shared`（即 NAT 共享、网关 10.42.0.1）；
-- SSID/密码须与 `lib/RobotConfig/config.h` 中 `WIFI_SSID` / `WIFI_PASS` 一致。
+- SSID/密码须与 `include/RobotConfig/config.h` 中 `WIFI_SSID` / `WIFI_PASS` 一致。
 
 ### 4.2 手动建 profile（更可控，推荐长期方案）
 
@@ -285,7 +285,7 @@ netsh wlan start hostednetwork
 
 ## 8. 固件网络拓扑与接入契约（STA 接入 / AP 自组网）
 
-> 对应代码：`lib/RobotConfig/net_boot.h`（网络自举入口）、`lib/RobotConfig/config.h`（拓扑开关与参数）。
+> 对应代码：`include/NetBoot/net_boot.h`（网络自举入口）、`include/RobotConfig/config.h`（拓扑开关与参数）。
 > 第 2 节从"上位机侧怎么建网"出发；本节从"固件侧支持哪两种网络形态、各自契约是什么"出发，两者互补。
 
 ### 8.1 两种拓扑总览

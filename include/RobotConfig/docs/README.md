@@ -68,10 +68,10 @@ RobotConfig 将之统一收纳，`config.h` 不入版本库，使配置调整与
 首次使用：
 
 ```bash
-cp lib/RobotConfig/config.example.h lib/RobotConfig/config.h
+cp include/RobotConfig/config.example.h include/RobotConfig/config.h
 ```
 
-调整配置时只修改 `lib/RobotConfig/config.h`（更换 Agent IP、调整 PID 参数、修改 WiFi 凭据等），
+调整配置时只修改 `include/RobotConfig/config.h`（更换 Agent IP、调整 PID 参数、修改 WiFi 凭据等），
 git 工作区保持干净。
 
 新增固件时 `#include "config.h"` 即可使用全部共享常量，无需重复定义；
@@ -90,9 +90,10 @@ git 工作区保持干净。
 - 新增常量需先加入模板再复制到本地 `config.h`，否则本地副本缺失该常量
   （模板更新不会自动同步到已存在的 `config.h`）；
 - 配置分散在两处（模板/本地），需注意二者同步；
-- 依赖 PlatformIO 的库机制：本库为纯头文件库，`pio run -t compiledb` 不会自动
-  注入其 include 路径，需 `tools/merge_ccdb.py` 在 `HEADER_ONLY_LIBS` 中登记
-  `lib/RobotConfig`，否则 clangd 无法解析 `config.h`。
+- 依赖 `tools/merge_ccdb.py` 兜底：本库为 include/ 下纯头文件子库，`pio run -t
+  compiledb` 只注入 `-I include` 顶层、不注入子目录，需在 `HEADER_ONLY_LIBS`
+  中登记本目录（`include/RobotConfig`，连同 `include/SemanticEnums`、
+  `include/NetBoot`），否则 clangd 无法解析 `config.h`。
 
 ## 7. 注意事项
 

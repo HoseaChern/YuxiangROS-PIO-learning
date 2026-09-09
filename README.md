@@ -85,13 +85,13 @@
 | Tx                  | GPIO14（UART1 RX）  | 数据仅雷达到主控 |
 | M_CTR               | GPIO13（LEDC PWM）  | 电机调速端       |
 
-| 项目     | 配置                                                                |
-| -------- | ------------------------------------------------------------------- |
-| 主控     | ESP32-S3-DevKitC-1（Xtensa LX7，Arduino framework）                 |
-| 电机驱动 | `Esp32McpwmMotor`（MCPWM）                                          |
-| 编码器   | `Esp32PcntEncoder`（PCNT 脉冲计数）                                 |
-| 通信     | micro-ROS over WiFi（UDP），Agent 地址见 `lib/RobotConfig/config.h` |
-| 控制周期 | 主循环 10 ms，里程计发布 50 ms                                      |
+| 项目     | 配置                                                                    |
+| -------- | ----------------------------------------------------------------------- |
+| 主控     | ESP32-S3-DevKitC-1（Xtensa LX7，Arduino framework）                     |
+| 电机驱动 | `Esp32McpwmMotor`（MCPWM）                                              |
+| 编码器   | `Esp32PcntEncoder`（PCNT 脉冲计数）                                     |
+| 通信     | micro-ROS over WiFi（UDP），Agent 地址见 `include/RobotConfig/config.h` |
+| 控制周期 | 主循环 10 ms，里程计发布 50 ms                                          |
 
 > 硬件差异：原书使用 Adafruit Feather 开发板，本仓库改用 ESP32-S3-DevKitC-1。
 > 固件与板型解耦，换板只需改 `platformio.ini` 的 `board` 与引脚——证明可灵活变通。
@@ -116,7 +116,7 @@
   `-I${PROJECT_DIR}/lib/MPU6050_light/src` 指向本地化后的 IMU 库头文件，保证任何
   激活环境下 IDE 都能解析该头（编译层面多余但无害）。
 - **配置与凭据分离**：引脚、标定参数、WiFi 凭据、Agent IP/端口等共用编译期常量
-  集中于 `lib/RobotConfig/config.h`（本地副本，不入库），模板见 `config.example.h`；
+  集中于 `include/RobotConfig/config.h`（本地副本，不入库），模板见 `config.example.h`；
   调整硬件接线/部署环境不会污染 git 工作区。
 
 ```ini
@@ -140,12 +140,13 @@ build_src_filter = +<examples/example01_helloworld>
 
 ```text
 YuxiangROS-PIO-learning/
-├── include/                     # 项目头文件（预留）
-├── lib/                         # 库（私有库 + 本地化第三方库）
+├── include/                     # 项目头文件（纯头文件，按功能分组）
+│   ├── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
+│   ├── RobotConfig/             # 共用编译期配置（config.example.h 模板 + docs）
+│   └── NetBoot/                 # 网络自举（net_boot.h：STA/AP 双模建网 + transport 注册）
+├── lib/                         # 库（私有算法库 + 本地化第三方库）
 │   ├── Kinematics/              # 两轮差速运动学（正/逆解 + 里程计），纯算法
 │   ├── PIDController/           # 位置式 PID，纯算法
-│   ├── RobotConfig/             # 共用编译期配置（config.example.h 模板 + net_boot.h + docs）
-│   ├── SemanticEnums/           # 语义化枚举（MotorID / VelocityID 等）
 │   ├── Esp32McpwmMotor/         # 第三方：MCPWM 电机驱动（gitignore，不入库）
 │   ├── Esp32PcntEncoder/        # 第三方：PCNT 编码器读取（gitignore，不入库）
 │   ├── MPU6050_light/           # 第三方：IMU 姿态解算（gitignore，不入库）
@@ -181,7 +182,7 @@ YuxiangROS-PIO-learning/
 
 ```bash
 # 准备配置（复制模板，填写 WiFi 凭据，并按实际硬件/部署调整）
-cp lib/RobotConfig/config.example.h lib/RobotConfig/config.h
+cp include/RobotConfig/config.example.h include/RobotConfig/config.h
 
 # 编译 / 烧录主固件
 pio run -e esp32-s3-devkitc-1
@@ -215,8 +216,8 @@ pio run -e test01_motor -t upload
 
 ## 运行与联调
 
-1. 填写 `lib/RobotConfig/config.h` 的 WiFi 账号密码；
-2. 将 `lib/RobotConfig/config.h` 中 `AGENT_IP_STR` 改为运行 micro-ROS Agent 的主机 IP；
+1. 填写 `include/RobotConfig/config.h` 的 WiFi 账号密码；
+2. 将 `include/RobotConfig/config.h` 中 `AGENT_IP_STR` 改为运行 micro-ROS Agent 的主机 IP；
 3. 烧录固件后，上位机启动 Agent：
 
    ```bash
@@ -312,9 +313,11 @@ python3 tools/merge_ccdb.py
   文件多条 command 会冲突；
 - 相对编译器名 `xtensa-esp32s3-elf-` 用 `startswith` 补绝对路径前缀；不要用
   `sed` 全局替换（该名字也存在于绝对路径内，会得到 `bin//home` 双前缀）；
-- `tools/merge_ccdb.py` 会为每条命令补齐 header-only 库 `lib/SemanticEnums`、
-  `lib/RobotConfig` 的 `-I`：PIO 的 `-t compiledb` 漏注入无 `.cpp` 的纯头文件库，
-  真实构建命令含该路径而 ccdb 缺失，导致 clangd 报头文件 not found；
+- `tools/merge_ccdb.py` 会为每条命令补齐 include/ 下纯头文件子库
+  `include/SemanticEnums`、`include/RobotConfig`、`include/NetBoot` 的 `-I`：
+  PIO 的 `-t compiledb` 只注入 `-I include` 顶层，不带子目录；源码以短名
+  （`SemanticEnums.h` / `config.h` / `net_boot.h`）引用这些头文件时，缺失
+  子目录 `-I` 会使 clangd 报头文件 not found；
 - 增删环境后重新执行本步骤。
 
 常见问题速查：
