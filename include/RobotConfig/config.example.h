@@ -108,10 +108,11 @@ char WIFI_PASS[] = "YOUR_WIFI_PASSWORD";
 constexpr uint32_t MICRO_ROS_STACK_SIZE = 10240; // micro-ROS 任务栈字节数
 constexpr uint8_t MICRO_ROS_TASK_PRIO = 1;       // 任务优先级
 constexpr uint32_t TRANSPORT_SETUP_MS = 2000;    // 传输层设置等待时间, 单位 ms
-constexpr uint32_t RECONNECT_INTERVAL_MS = 2000; // micro-ROS 会话重建间隔: agent 不可达/会话断开后延时重试, 单位 ms (test06_wifi 用)
-constexpr uint32_t ODOM_PUBLISH_MS = 50;         // 里程计发布周期, 单位 ms
-constexpr uint32_t SYNC_ATTEMPT_MS = 1000;       // 时间同步单次尝试时长, 单位 ms
-constexpr uint32_t SYNC_POLL_MS = 10;            // 时间同步轮询间隔, 单位 ms
+// micro-ROS 会话重建间隔: agent 不可达/会话断开后延时重试, 单位 ms
+constexpr uint32_t RECONNECT_INTERVAL_MS = 2000;
+constexpr uint32_t ODOM_PUBLISH_MS = 50;   // 里程计发布周期, 单位 ms
+constexpr uint32_t SYNC_ATTEMPT_MS = 1000; // 时间同步单次尝试时长, 单位 ms
+constexpr uint32_t SYNC_POLL_MS = 10;      // 时间同步轮询间隔, 单位 ms
 
 // ---- 雷达透传任务参数 (主环境融合固件: bridge_task) ----
 
@@ -155,9 +156,9 @@ constexpr uint8_t BALANCE_TASK_PRIO = 5;      // 任务优先级 (硬实时控�
 constexpr uint8_t BALANCE_TASK_CORE = 1;      // 任务核心号 (避开 core0 的 WiFi 协议栈抖动)
 constexpr uint32_t BALANCE_PRINT_MS = 100; // 状态打印周期, 100ms = 10Hz; 打印判定见其使用处 if 判断
 
-constexpr float UPRIGHT_KP = 47.5f;            // 直立环比例增益, 单位 PWM/deg, 震荡临界 47.5
+constexpr float UPRIGHT_KP = 17.5f * 0.75f;    // 直立环比例增益, 单位 PWM/deg, 震荡临界 17.5
 constexpr float UPRIGHT_KI = 0.0f;             // 直立环积分增益 (占位)
-constexpr float UPRIGHT_KD = 2.25f;            // 直立环微分增益, 单位 PWM/(deg/s), 震荡临界 2.25
+constexpr float UPRIGHT_KD = 1.375f * 0.75f;   // 直立环微分增益, 单位 PWM/(deg/s), 震荡临界 1.375
 constexpr float UPRIGHT_PWM_LIMIT = 100.0f;    // 直立环输出限幅, 占空比百分比语义为 0~100
 constexpr float UPRIGHT_ZERO_PITCH_DEG = 0.0f; // 机械中值角, 实测车身静止站立的平均 pitch 后修正
 
@@ -174,18 +175,18 @@ constexpr uint32_t IDLE_LOOP_MS = 1000; // 主循环空转延时, 单位 ms (控
 // target_angle = theta_0 - speed_output, 对应 docs 3.3 串级公式 ③
 // 注意: update_pwm_speed 输出经四舍五入取整为 int16_t, 分辨率 1deg, 整定时留意
 
-constexpr float SPEED_KP = 1.0f;              // 速度环比例增益, 单位 deg/(mm/s)
+constexpr float SPEED_KP = 0.05f;             // 速度环比例增益, 单位 deg/(mm/s)
 constexpr float SPEED_KI = SPEED_KP * 0.005f; // 速度环积分增益, 经验上为 KP 的 1/200
-constexpr float SPEED_KD = 0.0f;              // 速度环微分增益 (PI 无 D 项, 此处仅占位勿改)
+constexpr float SPEED_KD = 0.0f;              // 速度环微分增益 (占位)
 constexpr float SPEED_OUTPUT_LIMIT = 10.0f;   // 速度环输出限幅 (角度增量, deg), 防目标角过大失衡
 constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s (未武装时 '+'/'-' 串口设定)
 constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('+' 加 / '-' 减)
 
 // ---- 转向环参数 (test12_turn / test13_balance) ----
 // 指令项增益(开环转角驱动), 单位 PWM/deg (0.5 起步: 低于此单步差速<死区, 轮子不转)
-constexpr float TURN_KP = 0.75f;
-constexpr float TURN_KI = 0.0f;              // 积分增益 (无 I 项, 占位勿改)
-constexpr float TURN_KD = 0.2f;              // 阻尼项增益(角速度阻尼), 单位 PWM/(deg/s)
+constexpr float TURN_KP = 1.0f;
+constexpr float TURN_KI = 0.0f; // 积分增益 (占位)
+constexpr float TURN_KD = 0.6f; // 阻尼项增益(角速度阻尼), 单位 PWM/(deg/s) (经验起点, 待实测整定)
 constexpr float TURN_PWM_LIMIT = 60.0f;      // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
 constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 deg ('l'/'r' 每次步进)
 
