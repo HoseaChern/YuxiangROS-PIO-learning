@@ -51,8 +51,7 @@ constexpr uint8_t EXECUTOR_HANDLES = 2;
 // micro-ROS 节点名 (本固件独立命名, 避免与主固件 fishbot_motion_control 混淆)
 constexpr char BALANCE_NODE_NAME[] = "fishbot_balance";
 
-constexpr float MPS_TO_MM_S = 1000.0f;        // m/s → mm/s 换算 (仅本固件: ROS /cmd_vel 指令为 m/s)
-constexpr uint32_t AGENT_RECONNECT_MS = 1000; // Agent 会话断开后的重连等待, 单位 ms
+constexpr float MPS_TO_MM_S = 1000.0f; // m/s → mm/s 换算 (仅本固件: ROS /cmd_vel 指令为 m/s)
 
 enum class BalanceState : uint8_t {
     kIdle,    // 停止: 输出关闭, 等待武装且姿态进入中值窗口
@@ -81,8 +80,23 @@ volatile float cmd_linear_mps = 0.0f;                // /cmd_vel linear.x 原始
 volatile float cmd_angular_rps = 0.0f;               // /cmd_vel angular.z 原始值, 单位 rad/s
 volatile bool cmd_enable = false;                    // /balance_enable data: true=请求武装
 
+// ---- micro-ROS 实体 (micro_ros_task 经 create_entities 建立, destroy_entities 释放) ----
+// allocator 与 support 同级声明: rclc_support_init_with_options 把分配器地址存入
+// support->allocator, 分配器对象的生命周期须不短于 support。
+
+rcl_allocator_t allocator;           // 内存分配器
+rclc_support_t support;              // 稳态时钟 + 内存分配器 + 上下文 (rmw 会话的载体)
+rcl_node_t node;                     // ROS 节点
+rclc_executor_t executor;            // 执行器: 管理订阅句柄及其回调的执行
+rcl_subscription_t twist_sub;        // /cmd_vel 订阅者
+rcl_subscription_t enable_sub;       // /balance_enable 订阅者
+geometry_msgs__msg__Twist twist_msg; // /cmd_vel 消息缓冲区 (执行器写入, twist_callback 读取)
+std_msgs__msg__Bool enable_msg; // /balance_enable 消息缓冲区 (执行器写入, enable_callback 读取)
+
 // ---- 函数前向声明 (内部链接) ----
 
+bool create_entities();
+void destroy_entities();
 void handle_serial_command(float theta);
 void control_step();
 void balance_task(void* param);
@@ -168,10 +182,6 @@ void loop() {
 }
 
 namespace {
-
-// micro-ROS 订阅消息缓冲区 (仅 micro_ros_task 中的 executor 回调使用, 无跨任务竞争)
-geometry_msgs__msg__Twist twist_msg;
-std_msgs__msg__Bool enable_msg;
 
 /**
  * @brief /cmd_vel 订阅回调 (在 micro_ros_task 上下文执行)
@@ -415,70 +425,210 @@ void balance_task(void* param) {
 }
 
 /**
- * @brief micro-ROS 通信任务 (默认核, 优先级低于控制任务)
+ * @brief 建立 micro-ROS 会话并按创建顺序装配实体 (在 micro_ros_task 中调用)
  *
- * 建立 WiFi + UDP 会话并运行 executor; spin 返回错误 (Agent 断开/重连) 时
- * 清空命令与武装请求, 让 balance_task 下一周期停止输出, 防止失控时小车携带指令奔跑。
+ * 逐步检查返回值, 任一步失败立即返回 false, 由调用方 destroy_entities 统一逆序释放。
+ * 依据: 初始化失败会把句柄留在无效状态, 继续注册或 spin 会沿无效句柄传播失败;
+ * rclc_executor_init 对句柄容量 0 直接返回 RCL_RET_INVALID_ARGUMENT 且不初始化 executor,
+ * 故句柄容量必须 >= 1。
+ *
+ * @return true=会话与全部实体就绪; false=任一步失败
  */
-void micro_ros_task(void* param) {
-    (void)param;
-    // 任务起点打印: 置于首个 delay 之前, 上电后立即可见, 用于判别固件是否包含最新代码
-    Serial.println("[ROS] micro_ros_task start");
+bool create_entities() {
+    // 1. 初始化 support: 内部经 rmw 与 agent 建立会话, agent 不可达时在此失败
+    rcl_ret_t ret = rclc_support_init(&support, 0, nullptr, &allocator);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] support init failed (%d), agent unreachable, retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
 
-    // 网络自举: STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定, 并注册 UDP transport;
-    // 连接前后的诊断打印由 wifi_role_boot 内部提供 (阻塞连接失败时串口可见)
-    IPAddress agent_ip;
-    wifi_role_boot(agent_ip);  // 按 WIFI_ROLE_AP 决定 STA 接入或 AP 自组网
-    delay(TRANSPORT_SETUP_MS); // 等待传输层设置完成
+    // 2. 初始化 ROS 节点
+    ret = rclc_node_init_default(&node, BALANCE_NODE_NAME, "", &support);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] node init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
 
-    rcl_allocator_t allocator = rcl_get_default_allocator();
-    rclc_support_t support;
-    rclc_support_init(&support, 0, nullptr, &allocator);
+    // 3. 初始化执行器: 句柄容量 EXECUTOR_HANDLES >= 1, 满足 rclc 契约
+    ret = rclc_executor_init(&executor, &support.context, EXECUTOR_HANDLES, &allocator);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] executor init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
 
-    rcl_node_t node;
-    rclc_node_init_default(&node, BALANCE_NODE_NAME, "", &support);
-
-    rclc_executor_t executor;
-    rclc_executor_init(&executor, &support.context, EXECUTOR_HANDLES, &allocator);
-
-    // 两个 best-effort 订阅: 控制指令 /cmd_vel 与武装开关 /balance_enable
-    rcl_subscription_t twist_sub;
-    rcl_subscription_t enable_sub;
-    rclc_subscription_init_best_effort(
+    // 4. 两个 best-effort 订阅: 控制指令 /cmd_vel 与武装开关 /balance_enable
+    ret = rclc_subscription_init_best_effort(
         &twist_sub,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         CMD_VEL_TOPIC
     );
-    rclc_subscription_init_best_effort(
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] cmd_vel subscription init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
+
+    ret = rclc_subscription_init_best_effort(
         &enable_sub,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
         BALANCE_ENABLE_TOPIC
     );
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] balance_enable subscription init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
 
-    rclc_executor_add_subscription(&executor, &twist_sub, &twist_msg, &twist_callback, ON_NEW_DATA);
-    rclc_executor_add_subscription(
+    // 5. 把两个订阅句柄注册到执行器: 均在收到新数据时触发对应回调
+    ret = rclc_executor_add_subscription(
+        &executor,
+        &twist_sub,
+        &twist_msg,
+        &twist_callback,
+        ON_NEW_DATA
+    );
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] add cmd_vel subscription failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
+
+    ret = rclc_executor_add_subscription(
         &executor,
         &enable_sub,
         &enable_msg,
         &enable_callback,
         ON_NEW_DATA
     );
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] add balance_enable subscription failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
 
+    return true;
+}
+
+/**
+ * @brief 逆序释放 create_entities 装配的全部实体 (在 micro_ros_task 中调用)
+ *
+ * 释放顺序与创建顺序相反, 保证引用者先于被引用者释放 (订阅者先于 node, node 先于 support)。
+ * 各 fini 对零初始化句柄返回 Ok 且不解引用, 故可全量调用; 返回值仅为错误码, 失败无补救动作。
+ * 返回值统一以局部变量消费: rcl_node_fini 的声明带 warn_unused_result 属性, 强制转换到 void 无法消除该告警。
+ * support 未建立 (context.impl 为空) 时其余实体必然未创建, 直接返回:
+ * 该情况下 rclc_support_fini 会依次打印 rcl_clock_fini / rcl_shutdown 的告警。
+ */
+void destroy_entities() {
+    // support 未建立, 则会话未建立, 其余实体未创建
+    if (support.context.impl == nullptr) {
+        return;
+    }
+
+    // 1. 释放两个订阅者 (其创建依赖 node, 必须先于 node 释放)
+    rcl_ret_t enable_sub_fini_ret = rcl_subscription_fini(&enable_sub, &node);
+    (void)enable_sub_fini_ret;
+    rcl_ret_t twist_sub_fini_ret = rcl_subscription_fini(&twist_sub, &node);
+    (void)twist_sub_fini_ret;
+
+    // 2. 释放执行器
+    rcl_ret_t executor_fini_ret = rclc_executor_fini(&executor);
+    (void)executor_fini_ret;
+
+    // 3. 释放 node
+    rcl_ret_t node_fini_ret = rcl_node_fini(&node);
+    (void)node_fini_ret;
+
+    // 4. 释放 support (稳态时钟 + 上下文, 最后释放)
+    rcl_ret_t support_fini_ret = rclc_support_fini(&support);
+    (void)support_fini_ret;
+}
+
+/**
+ * @brief micro-ROS 通信任务 (默认核, 优先级低于控制任务)
+ *
+ * 生命周期: 网络自举 -> create_entities -> spin -> 解除武装 -> destroy_entities -> 延时重建, 任务永不返回。
+ * 依据 1: 会话失效后 rmw 无重建会话路径 (uxr_create_session 只在 rmw_init 中调用),
+ *         只有重建 support 才能恢复, 故 spin 出错后须释放并重建。
+ * 依据 2: xTaskCreate 创建的任务函数一旦 return, FreeRTOS 会从已失效的任务栈指针继续调度,
+ *         表现为 PC 奇数不对齐、IllegalInstruction 复位, 故不得越过函数尾返回。
+ * 依据 3: 指令通道失效时必须先清空命令与武装请求, 否则 balance_task 会按陈旧指令继续输出。
+ */
+void micro_ros_task(void* param) {
+    (void)param;
+    // 任务起点打印: 置于首个 delay 之前, 上电后立即可见, 用于判别固件是否包含最新代码
+    Serial.println("[ROS] micro_ros_task start");
+
+    // 1. 网络自举: STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定, 并注册 UDP transport;
+    //    连接前后的诊断打印由 wifi_role_boot 内部提供 (阻塞连接失败时串口可见)
+    IPAddress agent_ip;
+    wifi_role_boot(agent_ip);  // 按 WIFI_ROLE_AP 决定 STA 接入或 AP 自组网
+    delay(TRANSPORT_SETUP_MS); // 等待传输层设置完成
+
+    // 2. 初始化内存分配器
+    allocator = rcl_get_default_allocator();
+
+    // 3. 建立会话并运行: 创建失败或会话失效均回到循环头部重建
     for (;;) {
-        const rcl_ret_t rc = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
-        if (rc != RCL_RET_OK) {
-            // Agent 会话断开: 清命令与武装请求, balance_task 下周期读取后停止输出
-            Serial.println("[ROS] agent session lost, disarm");
-            portENTER_CRITICAL(&cmd_mux);
-            cmd_linear_mps = 0.0f;
-            cmd_angular_rps = 0.0f;
-            cmd_enable = false;
-            portEXIT_CRITICAL(&cmd_mux);
-            delay(AGENT_RECONNECT_MS); // 等待重连窗口后继续 spin
+        if (!create_entities()) {
+            destroy_entities();           // 释放已成功创建的部分
+            delay(RECONNECT_INTERVAL_MS); // 延时后重试
+            continue;                     // 回到循环头部重建
         }
-        delay(1); // 让出 CPU, 避免独占 core0
+
+        // 手动 spin 轮询: 等待集含 /cmd_vel 与 /balance_enable 两个订阅句柄, rcl_wait 单轮
+        // 最多阻塞 RCL_MS_TO_NS(10), 若无事件则到点返回; 仅当 agent 会话失效 (context 无效)
+        // 时 spin_some 返回 RCL_RET_ERROR
+        Serial.printf("[micro_ros] node \"%s\" ready, spinning\n", BALANCE_NODE_NAME);
+        rcl_ret_t ret = RCL_RET_OK;
+        while (true) {
+            ret = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+            if ((ret != RCL_RET_OK) && (ret != RCL_RET_TIMEOUT)) {
+                break; // 跳出 spin 层, 进入下方解除武装与重建
+            }
+            delay(1); // 让出 CPU, 避免独占 core0
+        }
+
+        // 4. 会话失效: 先清命令与武装请求, 再释放实体并重建
+        //    balance_task 下一周期读到 cmd_enable=false 后停止输出, 防止小车携带陈旧指令奔跑
+        Serial.printf(
+            "[micro_ros] spin_some failed (%d), agent session lost, disarm and rebuild in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        portENTER_CRITICAL(&cmd_mux);
+        cmd_linear_mps = 0.0f;
+        cmd_angular_rps = 0.0f;
+        cmd_enable = false;
+        portEXIT_CRITICAL(&cmd_mux);
+
+        destroy_entities();
+        delay(RECONNECT_INTERVAL_MS); // 延时后回到循环头部重建
     }
 }
 

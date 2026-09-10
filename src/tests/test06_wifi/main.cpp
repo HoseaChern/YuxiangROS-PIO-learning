@@ -27,8 +27,19 @@ Esp32PcntEncoder encoders[2];    // 编码器对象数组 (setup/loop 共享)
 PIDController pid_controller[2]; // PID 控制器对象数组 (setup/loop 共享)
 Kinematics kinematics;           // 运动学正逆解对象 (setup/loop 共享)
 
+// ---- micro-ROS 实体 (micro_ros_task 经 create_entities 建立, destroy_entities 释放) ----
+// allocator 与 support 同级声明: rclc_support_init_with_options 把分配器地址存入
+// support->allocator, 分配器对象的生命周期须不短于 support。
+
+rcl_allocator_t allocator; // 内存分配器
+rclc_support_t support;    // 稳态时钟 + 内存分配器 + 上下文 (rmw 会话的载体)
+rcl_node_t node;           // ROS 节点
+rclc_executor_t executor;  // 执行器: 管理句柄及其回调的执行
+
 // ---- 函数前向声明（内部链接） ----
 
+bool create_entities();
+void destroy_entities();
 void micro_ros_task(void* parameter);
 void update_and_control();
 
@@ -83,26 +94,96 @@ void loop() {
 namespace {
 
 /**
+ * @brief 建立 micro-ROS 会话并按创建顺序装配实体 (在 micro_ros_task 中调用)
+ *
+ * 逐步检查返回值, 任一步失败立即返回 false, 由调用方 destroy_entities 统一逆序释放。
+ * 依据: 初始化失败会把句柄留在无效状态, 继续注册或 spin 会沿无效句柄传播失败;
+ * rclc_executor_init 对句柄容量 0 直接返回 RCL_RET_INVALID_ARGUMENT 且不初始化 executor,
+ * 故句柄容量必须 >= 1。
+ *
+ * @return true=会话与全部实体就绪; false=任一步失败
+ */
+bool create_entities() {
+    // 1. 初始化 support: 内部经 rmw 与 agent 建立会话, agent 不可达时在此失败
+    rcl_ret_t ret = rclc_support_init(&support, 0, nullptr, &allocator);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] support init failed (%d), agent unreachable, retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
+
+    // 2. 初始化 ROS 节点
+    ret = rclc_node_init_default(&node, NODE_NAME, "", &support);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] node init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
+
+    // 3. 初始化执行器: 句柄容量 EXECUTOR_HANDLES >= 1, 满足 rclc 契约
+    ret = rclc_executor_init(&executor, &support.context, EXECUTOR_HANDLES, &allocator);
+    if (ret != RCL_RET_OK) {
+        Serial.printf(
+            "[micro_ros] executor init failed (%d), retry in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief 逆序释放 create_entities 装配的全部实体 (在 micro_ros_task 中调用)
+ *
+ * 释放顺序与创建顺序相反, 保证引用者先于被引用者释放 (执行器先于 node, node 先于 support)。
+ * 各 fini 对零初始化句柄返回 Ok 且不解引用, 故可全量调用; 返回值仅为错误码, 失败无补救动作。
+ * 返回值统一以局部变量消费: rcl_node_fini 的声明带 warn_unused_result 属性, 强制转换到 void 无法消除该告警。
+ * support 未建立 (context.impl 为空) 时其余实体必然未创建, 直接返回:
+ * 该情况下 rclc_support_fini 会依次打印 rcl_clock_fini / rcl_shutdown 的告警。
+ */
+void destroy_entities() {
+    // support 未建立, 则会话未建立, 其余实体未创建
+    if (support.context.impl == nullptr) {
+        return;
+    }
+
+    // 1. 释放执行器
+    rcl_ret_t executor_fini_ret = rclc_executor_fini(&executor);
+    (void)executor_fini_ret;
+
+    // 2. 释放 node
+    rcl_ret_t node_fini_ret = rcl_node_fini(&node);
+    (void)node_fini_ret;
+
+    // 3. 释放 support (稳态时钟 + 上下文, 最后释放)
+    rcl_ret_t support_fini_ret = rclc_support_fini(&support);
+    (void)support_fini_ret;
+}
+
+/**
  * @brief micro-ROS 任务
  *
  * 单独创建一个任务运行 micro-ROS, 相当于一个线程。
  * xTaskCreate() 要求的任务函数原型必须为: void task(void* parameter)
  *
- * 本函数执行 "初始化 -> spin -> 释放 -> 重建" 的完整生命周期, 任务永不返回。
- * 依据: xTaskCreate 创建的任务函数一旦 return, FreeRTOS 会从已失效的任务栈指针
- * 继续调度, 表现为 PC 奇数不对齐、IllegalInstruction 复位; 故初始化失败或
- * agent 会话失效时必须循环重建, 不得越过函数尾返回。
+ * 生命周期: 网络自举 -> create_entities -> spin -> destroy_entities -> 延时重建, 任务永不返回。
+ * 依据 1: 会话失效后 rmw 无重建会话路径 (uxr_create_session 只在 rmw_init 中调用),
+ *         只有重建 support 才能恢复, 故 spin 出错后须释放并重建。
+ * 依据 2: xTaskCreate 创建的任务函数一旦 return, FreeRTOS 会从已失效的任务栈指针继续调度,
+ *         表现为 PC 奇数不对齐、IllegalInstruction 复位, 故不得越过函数尾返回。
  *
  * @param parameter 任务参数
  */
 void micro_ros_task(void* parameter) {
     (void)parameter; // 任务参数未使用
-
-    // 静态局部变量: 仅本函数使用, static 保持其跨重建循环存活, 避免栈上反复分配
-    static rcl_allocator_t allocator; // 内存分配器, 用于动态内存分配管理
-    static rclc_support_t support;    // 用于存储时钟、内存分配器和上下文, 提供支持
-    static rclc_executor_t executor;  // 执行器, 用于管理订阅和计时器回调的执行
-    static rcl_node_t node;           // ROS 节点
 
     // 1. 网络自举并延时等待设置完成 (STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定),
     //    仅执行一次: transport 注册与后续 rmw 会话建立解耦
@@ -113,97 +194,34 @@ void micro_ros_task(void* parameter) {
     // 2. 初始化内存分配器
     allocator = rcl_get_default_allocator();
 
-    // 3-6. 每步检查返回值: 任一失败即释放已成功初始化的对象并延时重建;
-    //     若不检查, 失败会传播到未初始化句柄, 或使 spin 异常返回后越过函数尾触发复位
+    // 3. 建立会话并运行: 创建失败或会话失效均回到循环头部重建
     for (;;) {
-        // 3. 初始化 support: 内部经 rmw 与 agent 建立会话, agent 不可达时在此失败
-        rcl_ret_t ret = rclc_support_init(&support, 0, NULL, &allocator);
-        // 检查 support 是否成功创建
-        if (ret != RCL_RET_OK) {
-            // 若失败
-            Serial.printf(
-                "[micro_ros] support init failed (%d), agent unreachable, retry in %u ms\n",
-                ret,
-                RECONNECT_INTERVAL_MS
-            );
-
+        if (!create_entities()) {
+            destroy_entities();           // 释放已成功创建的部分
             delay(RECONNECT_INTERVAL_MS); // 延时后重试
-            continue;                     // 回到循环头部重新初始化
+            continue;                     // 回到循环头部重建
         }
 
-        // 4. 初始化 ROS 节点
-        ret = rclc_node_init_default(&node, NODE_NAME, "", &support);
-        // 检查 node 是否成功创建
-        if (ret != RCL_RET_OK) {
-            // 若失败
-            Serial.printf(
-                "[micro_ros] node init failed (%d), retry in %u ms\n",
-                ret,
-                RECONNECT_INTERVAL_MS
-            );
-
-            // node 未初始化成功, 逆序释放已成功的 support
-            rcl_ret_t support_fini_ret = rclc_support_fini(&support);
-            (void)support_fini_ret; // fini 失败无补救动作, 消费返回值
-
-            delay(RECONNECT_INTERVAL_MS); // 延时后重试
-            continue;                     // 回到循环头部重新初始化
-        }
-
-        // 5. 初始化执行器: 句柄容量 EXECUTOR_HANDLES >= 1, 满足 rclc 契约
-        ret = rclc_executor_init(&executor, &support.context, EXECUTOR_HANDLES, &allocator);
-        // 检查 executor 是否成功创建
-        if (ret != RCL_RET_OK) {
-            // 若失败
-            Serial.printf(
-                "[micro_ros] executor init failed (%d), retry in %u ms\n",
-                ret,
-                RECONNECT_INTERVAL_MS
-            );
-
-            // 逆序释放已成功的 node
-            rcl_ret_t node_fini_ret = rcl_node_fini(&node);
-            (void)node_fini_ret; // fini 失败无补救动作, 消费返回值
-
-            // node 未初始化成功, 逆序释放已成功的 support
-            rcl_ret_t support_fini_ret = rclc_support_fini(&support);
-            (void)support_fini_ret; // fini 失败无补救动作, 消费返回值
-
-            delay(RECONNECT_INTERVAL_MS); // 延时后重试
-            continue;                     // 回到循环头部重新初始化
-        }
-
-        // 6. 手动 spin 轮询: 本固件无注册句柄, rcl_wait 对空等待集立即返回,
-        //    因此 rclc_executor_spin 会退化为无休眠忙循环独占 core0;
-        //    改用 spin_some + delay 显式让出 CPU。仅当 agent 会话失效(context 无效)
-        //    时 spin_some 返回错误, 跳出本层循环进入重建
+        // 手动 spin 轮询: 本固件无注册句柄, rcl_wait 对空等待集立即返回, rclc_executor_spin
+        // 会退化为无休眠忙循环独占 core0, 故改用 spin_some + delay 显式让出 CPU;
+        // 仅当 agent 会话失效 (context 无效) 时 spin_some 返回错误
         Serial.printf("[micro_ros] node \"%s\" ready, spinning\n", NODE_NAME);
+        rcl_ret_t ret = RCL_RET_OK;
         while (true) {
             ret = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
             if ((ret != RCL_RET_OK) && (ret != RCL_RET_TIMEOUT)) {
-                Serial.printf(
-                    "[micro_ros] spin_some failed (%d), agent session lost, rebuild in %u ms\n",
-                    ret,
-                    RECONNECT_INTERVAL_MS
-                );
-                break; // 跳出 spin 层, 进入下方逆序释放与重建
+                break; // 跳出 spin 层, 进入下方释放与重建
             }
-            delay(1); // 让出 CPU, 避免空句柄下无休眠轮询独占 core0
+            delay(1); // 让出 CPU, 避免空等待集下无休眠轮询独占 core0
         }
 
-        // 逆序释放本生命周期内已初始化的对象, 回到循环头部重建
-        // 先释放执行器
-        rcl_ret_t executor_fini_ret = rclc_executor_fini(&executor);
-        (void)executor_fini_ret; // 消费返回值
-
-        // 再释放 node
-        rcl_ret_t node_fini_ret = rcl_node_fini(&node);
-        (void)node_fini_ret; // 消费返回值
-
-        // 最后释放 support
-        rcl_ret_t support_fini_ret = rclc_support_fini(&support);
-        (void)support_fini_ret; // 消费返回值
-
+        // 4. 会话失效: 打印后释放实体并重建
+        Serial.printf(
+            "[micro_ros] spin_some failed (%d), agent session lost, rebuild in %u ms\n",
+            ret,
+            RECONNECT_INTERVAL_MS
+        );
+        destroy_entities();
         delay(RECONNECT_INTERVAL_MS); // 延时后回到循环头部重建
     }
 }
