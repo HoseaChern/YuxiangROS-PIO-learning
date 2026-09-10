@@ -57,12 +57,13 @@ pio device monitor -e test09_bridge   # 115200
 | `[MOTOR] ... duty=89`        | M_CTR PWM 已输出，雷达电机应转 | 电机不转查供电与 PWM 脚     |
 | `[UART] 最近 2s 收到 N 字节` | N 持续增长 = 雷达数据进 UART1  | N 恒 0 查 5V 供电与 Tx 接线 |
 
-**注意 `[MOTOR]` 只在上电时打印一次**（见 `main.cpp` setup），而 `pio device
-monitor` 通常晚于上电才连上串口，日志可能已错过。若没看到 `[MOTOR]`，**按下
-开发板 RST 键重启**，让串口监视器捕获完整的启动日志，再观察电机是否起转。
+**注意 `[MOTOR]` 只在上电时打印一次**（见 `src/tests/test09_bridge/main.cpp` 的
+setup），而 `pio device monitor` 通常晚于上电才连上串口，日志可能已错过。若没看到
+`[MOTOR]`，**按下开发板 RST 键重启**，让串口监视器捕获完整的启动日志，再观察电机
+是否起转。
 
-`[UART]` 计数打印在 WiFi 连接逻辑之前（见 `main.cpp` loop 第 0 步），即使 WiFi
-未连、上位机未起也能观测，这是该固件的设计要点。
+`[UART]` 计数打印在 WiFi 连接逻辑之前（见 `src/tests/test09_bridge/main.cpp` 的
+loop 第 0 步），即使 WiFi 未连、上位机未起也能观测，这是该固件的设计要点。
 
 #### 1.3.2 第 2 步：下位机上电运行，上位机先启动 tcp_server
 
@@ -201,6 +202,18 @@ scan 的 frame_id 可在 TF 树中解析。
 - 下位机（ESP32-S3 固件侧）：远程仓库 `YuxiangROS-PIO-learning`（本仓库），
   仅 2.1 前置的固件烧录涉及。
 
+**起控契约**：融合固件即主固件 `src/main.cpp`，其本身是两轮自平衡控制固件：直立环
+PD 直接输出 PWM，`/cmd_vel` 只作为速度环外环的目标速度。未武装时状态机停在 IDLE
+且不输出任何 PWM，故一切依赖运动的联调（T1、建图遥控、导航）都必须先武装：
+
+```bash
+ros2 topic pub --once /balance_enable std_msgs/msg/Bool "{data: true}"
+```
+
+武装后倾角进入机械中值窗口（`UPRIGHT_ARM_ANGLE_DEG`）即进入 RUN；以下三种情况
+立即停机：`/balance_enable` 置 false、倾角超出 `UPRIGHT_FALL_ANGLE_DEG`、micro-ROS
+会话断开（Agent 关闭或断网）。
+
 ### 2.0 原书代码清单与本工程对应
 
 | 原书清单 | 内容                   | 本工程对应                                                   |
@@ -221,6 +234,11 @@ scan 的 frame_id 可在 TF 树中解析。
 烧录融合固件 `pio run -e esp32-s3-devkitc-1 -t upload`；其余步骤均在上位机。
 上位机与 ESP32 同网段。
 
+融合固件的串口同时输出两类日志：透传链路的 `[MOTOR]`（setup 打印一次）、`[UART]`
+（每 2s 一次）、`[TCP]`（连接状态变化时），以及控制链路的
+`state=... theta=... pwm_L=... pwm_R=...`（10Hz），据此可在同一串口区分雷达链路与
+平衡控制的状态。
+
 #### 步骤 1（终端 1）：启动 urdf2tf（原书 9-59）
 
 ```bash
@@ -237,7 +255,7 @@ ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
 ```
 
 验证：agent 打印上下位机连接成功；另开终端 `ros2 topic hz /odom` 约 20Hz
-（融合固件发布，TF：odom → base_footprint）。
+（融合固件发布，TF：odom → base_footprint；里程计发布与是否武装无关）。
 
 #### 步骤 3（终端 3）：启动 odom2tf 节点（原书 9-60 的可执行）
 
@@ -266,11 +284,17 @@ ros2 launch robot_bringup bringup.launch.py
 ```
 
 随后给机器人重新上电，在各节点正常运行后检查各话题和 TF 结构
-（原书 9-62 段落），检查项：
+（原书 9-62 段落）。运动检查前先武装（见本节起控契约）：
+
+```bash
+ros2 topic pub --once /balance_enable std_msgs/msg/Bool "{data: true}"
+```
+
+检查项：
 
 | 步骤    | 操作                            | 判定                                             |
 | ------- | ------------------------------- | ------------------------------------------------ |
-| T1 运动 | bringup 后 pub /cmd_vel         | 底盘响应；`ros2 topic hz /odom` 约 20Hz          |
+| T1 运动 | 武装后 pub /cmd_vel             | 底盘响应；`ros2 topic hz /odom` 约 20Hz          |
 | T2 雷达 | bringup 已含 tcp_server+ydlidar | `ros2 topic hz /scan` 不低于 13Hz（best_effort） |
 | T3 压测 | T1+T2 同时运行 5 分钟以上       | 频率稳定；无 TCP 重连风暴；`/odom` 连续无中断    |
 
@@ -290,6 +314,11 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 scan_topic=/scan，与本工程 TF 链一致，无需自定义配置；遥控慢速走遍场地，
 slam_toolbox 只消费数据不产生运动。可选另开终端 rviz2（Fixed Frame 设 map、
 添加 /map 显示）观察建图质量。
+
+遥控前机器人必须处于武装状态（见本节起控契约），否则 `/cmd_vel` 不产生任何运动。
+若建图途中倒地停机，里程计不会被清零（固件在停止状态下仍逐周期积分，只是轮速为 0），
+重新武装后位姿从原值续算；倒地过程中车轮空转产生的位姿误差无法被里程计观测，
+会逐渐累积到地图上，故倒地后建议重新建图。
 
 ### 2.4 保存地图并入库（原书 9-64）（上位机）
 
@@ -322,6 +351,9 @@ ros2 launch robot_navigation2 navigation2.launch.py use_sim_time:=False
 
 随后 rviz2 用 2D Pose Estimate 给 AMCL 初始位姿（不给则定位发散），再用
 Nav2 Goal 下发目标点，观察路径跟踪与避障。
+
+Nav2 通过 `/cmd_vel` 驱动机器人，故整个导航过程必须保持武装（见本节起控契约）；
+中途因倒地或 Agent 断开停机时，重新武装并重给初始位姿后再下发目标点。
 
 ### 2.6 执行顺序总览
 

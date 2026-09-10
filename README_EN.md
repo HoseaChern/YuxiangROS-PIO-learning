@@ -1,10 +1,12 @@
 # YuxiangROS-PIO-learning
 
 > Companion repository of the book *ROS 2 Robot Development: from Beginner to
-> Practice* (by Sang Xin / fishros). This is the ESP32-S3 motion-control firmware
-> for the real robot (Chapter 9): it subscribes to `/cmd_vel` via micro-ROS,
-> drives the motors through inverse kinematics and a PID velocity loop, and
-> publishes `/odom`.
+> Practice* (by Sang Xin / fishros). This is the ESP32-S3 firmware project for the
+> real robot (Chapter 9): the main firmware performs two-wheel self-balancing
+> (inverted-pendulum) motion control, subscribing to `/cmd_vel` and
+> `/balance_enable` via micro-ROS, driving the motors through a cascade of a
+> velocity loop PI and an upright loop PD, and publishing `/odom`; the same MCU
+> also runs the lidar passthrough.
 > Highlight: the book directly modifies the previous section's code instead of
 > presenting an integrated project; this repo slices its per-section code blocks
 > into 15 independently buildable firmwares (examples / tests / main) for
@@ -37,19 +39,28 @@
 ## Overview
 
 The firmware runs on an ESP32-S3 (PlatformIO + Arduino framework) and talks to
-the host (ROS 2 Jazzy) over WiFi + micro-ROS:
+the host (ROS 2 Jazzy) over WiFi + micro-ROS. The chassis is a two-wheel
+self-balancing (inverted pendulum) robot with a three-loop cascade:
 
-1. subscribes to `/cmd_vel` (`geometry_msgs/msg/Twist`);
-2. inverse kinematics converts the body velocity into target wheel speeds
-   (pure-algorithm library `Kinematics`);
-3. PID velocity loop outputs PWM to the motors (pure-algorithm library
-   `PIDController`);
-4. odometry is integrated from encoder readings and `/odom`
+1. subscribes to `/cmd_vel` (`geometry_msgs/msg/Twist`) and `/balance_enable`
+   (`std_msgs/msg/Bool`, the arming switch);
+2. the upright loop PD takes the MPU6050 tilt angle and angular rate as feedback
+   and outputs the base PWM; it is the only loop driving the motors directly;
+3. the velocity loop PI takes the body velocity (encoder speeds through forward
+   kinematics) as feedback and outputs a target tilt increment which, added to
+   the mechanical zero, becomes the upright loop setpoint (pure-algorithm
+   libraries `PIDController`, `Kinematics`);
+4. the turn loop maps the target yaw rate to a differential-mode PWM, subtracted
+   from the base PWM to obtain the left/right duties;
+5. odometry is integrated from encoder readings and `/odom`
    (`nav_msgs/msg/Odometry`) is published at 50 ms.
 
 ```text
-/cmd_vel (Twist) -> inverse kinematics -> target wheel speeds -> PID -> PWM
--> motors + encoders -> odometry -> /odom
+outer: /cmd_vel (Twist) -> velocity loop PI -> target tilt
+inner: target tilt + MPU6050 tilt/rate -> upright loop PD -> base PWM
+turn:  /cmd_vel (Twist) -> turn loop -> differential-mode PWM
+mix:   base PWM +/- differential PWM -> wheel PWM -> motors + encoders
+       -> odometry integration -> /odom
 ```
 
 ## Correspondence with the Book
@@ -79,7 +90,9 @@ buildable projects, one-to-one:
 
 > Note: 9.2.1 (platform introduction) involves no code; 9.3.2 covers both "speed
 > measurement" and "speed conversion", hence two slices; the main firmware is the
-> convergence of 9.3.5 and 9.4.3 (embedded odometry + publishing `/odom`);
+> convergence of 9.3.5 and 9.4.3 (embedded odometry + publishing `/odom`) and of
+> the balance series test10 to test13 (upright + velocity + turn loops + wireless
+> remote), with the test09 lidar passthrough folded in as `bridge_task`;
 > 9.5.1 uses a standalone adapter board (ESP8266) in the book, this repo has the
 > ESP32-S3 take over instead, hence no standalone adapter slice; see the Lidar
 > section.
@@ -98,13 +111,18 @@ buildable projects, one-to-one:
 | Tx                  | GPIO14 (UART1 RX)            | lidar -> MCU only   |
 | M_CTR               | GPIO13 (LEDC PWM)            | motor speed control |
 
-| Item            | Configuration                                                              |
-| --------------- | -------------------------------------------------------------------------- |
-| MCU             | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)                         |
-| Motor driver    | `Esp32McpwmMotor` (MCPWM)                                                  |
-| Encoder reading | `Esp32PcntEncoder` (PCNT pulse counting)                                   |
-| Communication   | micro-ROS over WiFi (UDP), Agent address in `include/RobotConfig/config.h` |
-| Control period  | 10 ms main loop, 50 ms odometry publishing                                 |
+| MPU6050 (I2C) | Connected to ESP32-S3 | Description                 |
+| ------------- | --------------------- | --------------------------- |
+| SDA           | GPIO10                | attitude data `IMU_SDA_PIN` |
+| SCL           | GPIO9                 | clock `IMU_SCL_PIN`         |
+
+| Item            | Configuration                                                                   |
+| --------------- | ------------------------------------------------------------------------------- |
+| MCU             | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)                              |
+| Motor driver    | `Esp32McpwmMotor` (MCPWM)                                                       |
+| Encoder reading | `Esp32PcntEncoder` (PCNT pulse counting)                                        |
+| Communication   | micro-ROS over WiFi (UDP), Agent address in `include/RobotConfig/config.h`      |
+| Control period  | 5 ms upright-loop task (200 Hz), 50 ms odometry publishing, idle `loop()` (1 s) |
 
 > Hardware note: the book uses an Adafruit Feather board; this repo uses an
 > ESP32-S3-DevKitC-1 instead. The firmware is decoupled from the board, so
@@ -167,7 +185,7 @@ YuxiangROS-PIO-learning/
 │   ├── MPU6050_light/           # 3rd-party: IMU attitude estimation (git-ignored)
 │   └── micro_ros_platformio/    # 3rd-party: micro-ROS (git-ignored)
 ├── src/
-│   ├── main.cpp                 # main firmware: micro-ROS motion control + lidar passthrough (single-board merge)
+│   ├── main.cpp                 # main firmware: two-wheel self-balancing control + lidar passthrough (single-board merge)
 │   ├── examples/                # 4 example firmwares (example01~04)
 │   └── tests/                   # 13 test firmwares (test01~09 & balance test10_upright / test11_speed / test12_turn / test13_balance)
 ├── docs/                        # study notes & debugging records (incl. lidar integration)
@@ -181,12 +199,12 @@ All 4 third-party libraries are localized under `lib/` (shared by every
 environment, each keeps its `.git` for upstream tracking, git-ignored as a
 whole); the Source column is for upstream tracking only:
 
-| Library              | Purpose                 | Source                                                              | Used by                                                              |
-| -------------------- | ----------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08/10/11/12/13                           |
-| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08/11/12/13                              |
-| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08/13                                                |
-| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | example04, test10_upright, test11_speed, test12_turn, test13_balance |
+| Library              | Purpose                 | Source                                                              | Used by                                                                    |
+| -------------------- | ----------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Esp32McpwmMotor      | MCPWM motor driver      | [fishros](https://github.com/fishros/Esp32McpwmMotor)               | main, test01/03/04/05/06/07/08/10/11/12/13                                 |
+| Esp32PcntEncoder     | PCNT encoder reading    | [fishros](https://github.com/fishros/Esp32PcntEncoder)              | main, test02/03/04/05/06/07/08/11/12/13                                    |
+| micro_ros_platformio | micro-ROS support       | [fishros](https://github.com/fishros/micro_ros_platformio) (mirror) | main, test06/07/08/13                                                      |
+| MPU6050_light        | IMU attitude estimation | [rfetick](https://github.com/rfetick/MPU6050_light)                 | main, example04, test10_upright, test11_speed, test12_turn, test13_balance |
 
 > Why the fishros prebuilt mirror: the official
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -209,26 +227,26 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| Type    | Environment          | Description                                                                                                          |
-| ------- | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Main    | esp32-s3-devkitc-1   | motion control + lidar passthrough (micro-ROS `/cmd_vel`, `/odom` + bridge_task)                                     |
-| Example | example01_helloworld | Hello World                                                                                                          |
-| Example | example02_LED        | LED blink                                                                                                            |
-| Example | example03_Ultrasound | ultrasonic ranging                                                                                                   |
-| Example | example04_IMU        | MPU6050 attitude estimation                                                                                          |
-| Test    | test01_motor         | motor driver test                                                                                                    |
-| Test    | test02_encoder       | encoder reading and calibration                                                                                      |
-| Test    | test03_speed_trans   | speed conversion test                                                                                                |
-| Test    | test04_PID           | PID velocity loop test                                                                                               |
-| Test    | test05_Kinematics    | inverse kinematics + PID control test                                                                                |
-| Test    | test06_wifi          | micro-ROS WiFi connection test                                                                                       |
-| Test    | test07_Subscription  | `/cmd_vel` subscription + motion control test                                                                        |
-| Test    | test08_Publisher     | `/cmd_vel` subscription + `/odom` publishing (migrated from the main firmware)                                       |
-| Test    | test09_bridge        | lidar UART -> WiFi TCP passthrough (ESP32-S3 as the adapter board)                                                   |
-| Test    | test10_upright       | two-wheel self-balancing upright loop PD (MPU6050, phase 1; see docs/Balance_Car_Notes.md)                           |
-| Test    | test11_speed         | two-wheel self-balancing cascade: speed loop PI + upright loop PD (phase 2; see docs/Balance_Car_Notes.md)           |
-| Test    | test12_turn          | two-wheel self-balancing turning: turn loop differential-mode superposition (phase 3; see docs/Balance_Car_Notes.md) |
-| Test    | test13_balance       | two-wheel self-balancing wireless control: micro-ROS + WiFi keyboard remote (phase 4; see docs/Balance_Car_Notes.md) |
+| Type    | Environment          | Description                                                                                                                                                                    |
+| ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Main    | esp32-s3-devkitc-1   | two-wheel self-balancing control + lidar passthrough: subscribes `/cmd_vel`, `/balance_enable`, publishes `/odom`, embeds bridge_task (phase 5; see docs/Balance_Car_Notes.md) |
+| Example | example01_helloworld | Hello World                                                                                                                                                                    |
+| Example | example02_LED        | LED blink                                                                                                                                                                      |
+| Example | example03_Ultrasound | ultrasonic ranging                                                                                                                                                             |
+| Example | example04_IMU        | MPU6050 attitude estimation                                                                                                                                                    |
+| Test    | test01_motor         | motor driver test                                                                                                                                                              |
+| Test    | test02_encoder       | encoder reading and calibration                                                                                                                                                |
+| Test    | test03_speed_trans   | speed conversion test                                                                                                                                                          |
+| Test    | test04_PID           | PID velocity loop test                                                                                                                                                         |
+| Test    | test05_Kinematics    | inverse kinematics + PID control test                                                                                                                                          |
+| Test    | test06_wifi          | micro-ROS WiFi connection test                                                                                                                                                 |
+| Test    | test07_Subscription  | `/cmd_vel` subscription + motion control test                                                                                                                                  |
+| Test    | test08_Publisher     | `/cmd_vel` subscription + `/odom` publishing (migrated from the main firmware)                                                                                                 |
+| Test    | test09_bridge        | lidar UART -> WiFi TCP passthrough (ESP32-S3 as the adapter board)                                                                                                             |
+| Test    | test10_upright       | two-wheel self-balancing upright loop PD (MPU6050, phase 1; see docs/Balance_Car_Notes.md)                                                                                     |
+| Test    | test11_speed         | two-wheel self-balancing cascade: speed loop PI + upright loop PD (phase 2; see docs/Balance_Car_Notes.md)                                                                     |
+| Test    | test12_turn          | two-wheel self-balancing turning: turn loop differential-mode superposition (phase 3; see docs/Balance_Car_Notes.md)                                                           |
+| Test    | test13_balance       | two-wheel self-balancing wireless control: micro-ROS + WiFi keyboard remote (phase 4; see docs/Balance_Car_Notes.md)                                                           |
 
 ## Running and Integration
 
@@ -240,13 +258,25 @@ pio run -e test01_motor -t upload
    ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
    ```
 
-4. publish a velocity command to drive the chassis:
+4. arm the controller: with `/balance_enable` true and the tilt inside the
+   mechanical-zero window the firmware enters RUN and drives PWM; setting it
+   false stops the motors immediately (`/cmd_vel` produces no output while
+   stopped):
+
+   ```bash
+   ros2 topic pub --once /balance_enable std_msgs/msg/Bool "{data: true}"
+   ```
+
+   Sending `s` on the serial port toggles the same switch; `c` calibrates the
+   mechanical zero while stopped.
+
+5. publish a velocity command to drive the chassis:
 
    ```bash
    ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}, angular: {z: 0.0}}" -r 10
    ```
 
-5. inspect odometry: `ros2 topic echo /odom`
+6. inspect odometry: `ros2 topic echo /odom`
 
 For WiFi LAN setup — the evolution across a regular router, a phone hotspot, and
 the PC wireless-card hotspot (current solution), the per-layer theory (2.4/5 GHz
@@ -261,7 +291,7 @@ NetworkManager object model, common `nmcli` commands, and maintenance, see
 Chapter 9 of the book uses a separate adapter board (fishros
 `fishbot-laser-control`, ESP8266 + `uart2udp.bin`) for lidar UART->WiFi passthrough
 and motor PWM control. This repo **does not buy an adapter board**: the
-motion-control MCU (ESP32-S3) does the job instead (LEDC PWM drives the lidar
+ESP32-S3 running the main firmware does the job instead (LEDC PWM drives the lidar
 motor), keeping the same interface contract as the original adapter (TCP client
 actively connects to the host port 8889), so the host side is unchanged. Wiring:
 lidar Tx -> GPIO14 (UART1 RX, 115200), M_CTR -> GPIO13 (PWM 10 kHz).
@@ -270,6 +300,12 @@ For the phase-1 passthrough debugging record and the full phase-2 mapping /
 navigation workflow (both repos, terminal-by-terminal startup order, mapping to
 the book's listings 9-55 ~ 9-66, parameter adaptation and troubleshooting), see
 [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md).
+
+The passthrough and the balance control share one firmware with a per-core
+split: `balance_task` is pinned to core1 to keep the 5 ms control tick, while
+`bridge_task` is pinned to core0 alongside the WiFi stack; `bridge_task` only
+waits for the network to come up and never calls `WiFi.begin()` again, so the
+micro-ROS UDP session is not interrupted.
 
 ## Optimizations
 

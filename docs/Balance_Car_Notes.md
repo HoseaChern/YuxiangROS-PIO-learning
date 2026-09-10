@@ -63,6 +63,16 @@
       - [8.2 初始化与数据流](#82-初始化与数据流)
       - [8.3 上位机操作步骤](#83-上位机操作步骤)
       - [8.4 调参与联调要点](#84-调参与联调要点)
+  - [融合固件（主固件）](#融合固件主固件)
+    - [9. 设计](#9-设计)
+      - [9.1 话题契约](#91-话题契约)
+      - [9.2 任务划分与并发](#92-任务划分与并发)
+      - [9.3 起控与停机](#93-起控与停机)
+    - [10. 固件工程实现](#10-固件工程实现)
+      - [10.1 工程配置与依赖](#101-工程配置与依赖)
+      - [10.2 初始化与数据流](#102-初始化与数据流)
+      - [10.3 上位机操作步骤](#103-上位机操作步骤)
+      - [10.4 与各切片的收敛关系](#104-与各切片的收敛关系)
   - [调参指南（总纲）](#调参指南总纲)
     - [总原则](#总原则)
     - [调参总顺序](#调参总顺序)
@@ -81,7 +91,7 @@
 
 在鱼香 ROS 差速底盘（`fishbot_motion_control`）基础上加装 MPU6050，拆下从动轮，整车退化为一级倒立摆，通过电机闭环控制实现两轮自平衡。
 
-本文档按控制环组织，遵循"先控制理论数学模型，再实际代码工程实现"的顺序书写。当前已完成直立环（`test10_upright`）、速度环（`test11_speed`）、转向环（`test12_turn`）的控制理论与固件，并在 `test13_balance` 中通过 micro-ROS + WiFi 实现无线键盘遥控（`/cmd_vel`）。
+本文档按控制环组织，遵循"先控制理论数学模型，再实际代码工程实现"的顺序书写。当前已完成直立环（`test10_upright`）、速度环（`test11_speed`）、转向环（`test12_turn`）的控制理论与固件，在 `test13_balance` 中通过 micro-ROS + WiFi 实现无线键盘遥控（`/cmd_vel`），并在主固件 `src/main.cpp` 中把三环控制、里程计发布（`/odom`）与激光雷达透传收敛为单一固件。
 
 ---
 
@@ -871,7 +881,7 @@ $$
 - 通信与控制分核运行：`micro_ros_task`（默认核，优先级 1，executor 回调）经临界区写指令变量；`balance_task`（core1，优先级 5，5 ms/200 Hz 节拍）在临界区内读指令快照后执行三环控制。共享变量 `cmd_linear_mps` / `cmd_angular_rps`（float）与 `cmd_enable`（bool）为跨核非原子变量，一律由 `portMUX_TYPE` 临界区保护，避免跨核数据竞争；
 - 会话安全：micro-ROS Agent 断开（spin 返回错误）自动请求解除武装，防止失控时小车携带指令奔跑；
 - 倒地保护沿用 test12：$|\theta - \theta_0| > 45^\circ$ 自动停机；
-- 串口保留 `s`/`c` 作为调试后备（字符集与 test10/11/12 一致），无 WiFi/Agent 时仍可独立操控：`s` 武装/解除（等价翻转 `/balance_enable`），`c` 标定机械中值（仅 `kIdle` 生效，非阻塞逐周期采样）。
+- 串口保留 `s`/`c` 作为调试后备，无 WiFi/Agent 时仍可独立操控：`s` 武装/解除（等价翻转 `/balance_enable`），`c` 标定机械中值（仅 `kIdle` 生效，非阻塞逐周期采样）；`test10` 至 `test12` 的 `+`/`-`/`w`/`l`/`r`/`o` 等步进命令由 `/cmd_vel` 目标取代，不再保留。
 
 ### 8. 固件工程实现
 
@@ -917,6 +927,114 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 ---
 
+## 融合固件（主固件）
+
+`test10` 至 `test13` 分别验证了直立环、速度环、转向环与无线指令通道，`test08` 验证了里程计与 `/odom` 发布，`test09` 验证了雷达透传。主固件 `src/main.cpp` 把这三条链路收敛到同一块 ESP32-S3：一块主控同时承担平衡控制、里程计发布与雷达透传，硬件上不需要原书 9.5.1 所述的独立转接板。
+
+### 9. 设计
+
+#### 9.1 话题契约
+
+| 话题              | 类型                  | 方向 | 字段        | 映射                                                         |
+| ----------------- | --------------------- | ---- | ----------- | ------------------------------------------------------------ |
+| `/cmd_vel`        | `geometry_msgs/Twist` | 订阅 | `linear.x`  | 速度环目标 $v_{set}$（m/s → mm/s，限幅见 7.1）               |
+| `/cmd_vel`        | `geometry_msgs/Twist` | 订阅 | `angular.z` | 开环转向指令 $\omega_{z,set}$（rad/s → deg/s，折算见 7.2）   |
+| `/balance_enable` | `std_msgs/Bool`       | 订阅 | `data`      | `true` 请求武装 / `false` 请求解除                           |
+| `/odom`           | `nav_msgs/Odometry`   | 发布 | -           | 位姿与速度，`frame_id=odom`、`child_frame_id=base_footprint` |
+
+节点名 `fishbot_balance`，定义在固件本地，与 `NODE_NAME`（`test06/07/08` 使用的 `fishbot_motion_control`）区分：同一 Agent 下同名节点会冲突。`/cmd_vel` 是主命令通道，串口仅作无 Agent 时的后备，字符集为 `'s'`（翻转武装）与 `'c'`（标定机械中值），与 `test13` 相同：`test10` 至 `test12` 的 `+`/`-`/`w`/`l`/`r`/`o` 等命令服务于分段验证，主固件的速度与转向目标全部由 `/cmd_vel` 提供。
+
+串口处理有两处取舍与切片固件不同：
+
+1. **每周期至多消费一个字符**：串口积压摊薄到多个控制周期处理，不在 5 ms 节拍内长时间读 UART；
+2. **标定采样期间不响应新命令**：保证 $40 \times 5\ \mathrm{ms} = 0.2\ \mathrm{s}$ 的采样窗口不被 `s` 等命令打断，采样数据不被污染。
+
+#### 9.2 任务划分与并发
+
+| 任务             | 核     | 优先级 | 节拍       | 职责                                     |
+| ---------------- | ------ | ------ | ---------- | ---------------------------------------- |
+| `balance_task`   | core1  | 5      | 5 ms       | 姿态读取、三环控制、里程计积分、串口命令 |
+| `micro_ros_task` | 默认核 | 1      | 10 ms spin | executor、订阅回调、`/odom` 定时发布     |
+| `bridge_task`    | core0  | 1      | 事件驱动   | UART1 ↔ TCP 透传                         |
+
+分核依据：`balance_task` 钉 core1，避开 core0 上 WiFi 协议栈处理引起的调度抖动；`bridge_task` 钉 core0 与协议栈同核，TCP 读写不占用 core1 的控制节拍。`bridge_task` 只等待网络就绪，不调用 `WiFi.begin()`，避免重启协议栈打断 micro-ROS 的 UDP 会话。
+
+跨核共享数据一律用 `portMUX_TYPE` 临界区保护，变量集与 `test13` 相同（`cmd_linear_mps`、`cmd_angular_rps`、`cmd_enable`）。主固件额外保护里程计对象 `kinematics`：该对象由 `balance_task` 逐周期积分、由 `odom_callback`（core0）拷贝读取，而一条 `/odom` 消息同时包含位姿与速度多个字段，不加锁会读到不同周期拼合的状态。
+
+控制任务的延时用"补足到绝对时刻"而非 `vTaskDelayUntil`：后者在唤醒超时后把锚点重写为理论时刻并连续补跑控制周期，无线链路抖动时会放大输出突变；前者在超时后丢弃积压并重锚到当前时刻，只损失一拍相位。
+
+#### 9.3 起控与停机
+
+起控条件：`/balance_enable` 为 true 且 $|\theta - \theta_0| \le \mathrm{UPRIGHT\_ARM\_ANGLE\_DEG} = 8^\circ$，状态机由 `kIdle` 进入 `kRunning`，三环同时清零积分，避免残留误差造成起步冲击。
+
+停机条件（任一满足即回到 `kIdle` 并清零 PWM，同时把 `cmd_enable` 置 false，避免上位机残留 true 时自动重新起控）：
+
+1. `/balance_enable` 为 false；
+2. $|\theta - \theta_0| \ge \mathrm{UPRIGHT\_FALL\_ANGLE\_DEG} = 45^\circ$（倒地保护，与 `test12`/`test13` 同值）；
+3. micro-ROS 会话断开（`rclc_executor_spin_some` 返回非 `RCL_RET_OK`）。
+
+停机状态下里程计不停止积分：`control_step` 每周期都更新编码器速度与位姿，停机时轮速为 0，位姿保持在上一次值，重新武装后从该值续算。
+
+### 10. 固件工程实现
+
+#### 10.1 工程配置与依赖
+
+| 项             | 值                                                                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 环境           | `[env:esp32-s3-devkitc-1]`                                                                                                                                                        |
+| 源码过滤       | `build_src_filter = +<*> -<examples> -<tests>`                                                                                                                                    |
+| micro-ROS 传输 | `board_microros_transport = wifi`                                                                                                                                                 |
+| 依赖库         | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`Kinematics`、`PIDController`、`SemanticEnums`、`micro_ros_platformio`、`WiFi`、`NetBoot`（`include/NetBoot/net_boot.h`） |
+
+驱动库全部本地化在 `lib/` 与 `include/`，主环境不使用环境级 `lib_deps`；`lib_ignore =` 置空解除公共段对 `micro_ros_platformio` 的忽略，与 `test06/07/08/13` 一致。
+
+#### 10.2 初始化与数据流
+
+`setup()` 的顺序本身是约束：
+
+1. MPU6050 探测失败即停机，避免在无姿态反馈时进入控制；
+2. 陀螺仪零偏校准先于雷达电机上电：电机振动经结构传导到 IMU 会污染零偏采样；
+3. `Serial1.setRxBufferSize(4096)` 必须先于 `Serial1.begin(...)` 调用才生效，扫描数据流满载时防 UART FIFO 溢出丢帧；
+4. LEDC 配置 M_CTR（GPIO13）输出 `LIDAR_MOTOR_SPEED` 占空比，雷达电机随即起转；
+5. 依次初始化两路编码器、运动学参数、两路电机、三个 PID 控制器；
+6. 创建 `balance_task`（core1）、`micro_ros_task`、`bridge_task`（core0）。
+
+`micro_ros_task` 内建立 WiFi 与传输层、初始化节点与执行器，注册两个订阅后发布 `/odom`：发布者置于回调之前、时间同步与定时器置于 executor 自旋循环之前，先同步 epoch 再发布带时间戳的位姿。
+
+`loop()` 只做 1 s 延时：控制与命令处理全在 `balance_task`，主循环不参与实时链路。
+
+#### 10.3 上位机操作步骤
+
+前置（网络拓扑搭建与 Agent 启动）见 `docs/Network_Setup_Notes.md` 第 3 节。武装必须先于任何速度指令：未武装时状态机停在 `kIdle`，PWM 输出为 0。
+
+```bash
+# 终端 1: 武装 (等价串口发 's')
+ros2 topic pub --once /balance_enable std_msgs/msg/Bool "{data: true}"
+
+# 终端 2: 键盘遥控
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+
+# 终端 3: 里程计验证
+ros2 topic hz /odom
+```
+
+`ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: false}" -r 5`、关闭 Agent 或串口发 `s` 均停机；停机后串口发 `c` 可重新标定机械中值。
+
+#### 10.4 与各切片的收敛关系
+
+| 来源     | 收敛内容                                  | 主固件的增量                         |
+| -------- | ----------------------------------------- | ------------------------------------ |
+| `test10` | 直立环 PD、状态机、串口 `s`/`c` 字符集    | 起控与倒地阈值取值不变               |
+| `test11` | 速度环 PI 串级                            | 无                                   |
+| `test12` | 转向环差模叠加                            | 无                                   |
+| `test13` | micro-ROS 订阅、临界区、无线会话安全      | executor 句柄数 2 → 3（新增发布者）  |
+| `test08` | 里程计积分、`/odom` 发布、epoch 时间同步  | 里程计对象加临界区                   |
+| `test09` | UART1 配置、LEDC 驱动 M_CTR、TCP 双向透传 | 透传任务绑定 core0，改为等待网络就绪 |
+
+调试与联调流程见 `docs/Lidar_Radar_Debugging.md` 第 2 节。
+
+---
+
 ## 调参指南（总纲）
 
 本章集中收编各环的调参方法，参考社区平衡车串级 PID 调参经验（机械中值 → 直立环 → 速度环 → 转向环的整定顺序与现象判断法）总结而成。
@@ -938,12 +1056,13 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 | 3    | 速度环 Kp/Ki 极性 → 大小 | 先校验编码器相位（拨轮 speed 随动）；设 v_set=0 手拨轮应被抑制；增 Kp 至原地收敛，再设小目标速度按 `'w'` 验运动 | 速度环整定                       |
 | 4    | 转向环极性 → 大小        | 先 Kd 走直线阻尼、后 Kp 步进转角（无指令/有指令两态验证，见 7.2）                                               | 转向环整定                       |
 | 5    | 无线联调与限幅           | 限幅参数保守调低起步冲击                                                                                        | 8.4 调参与联调要点（命令见 8.3） |
+| 6    | 里程计与雷达联调         | 武装后验 `/odom` 约 20 Hz 与 odom→base_footprint 链、雷达透传链路                                               | 9.1 / 10.3                       |
 
 ### 直立环整定
 
 按"先极性、后大小，先 Kp、后 Kd"的顺序，全程手扶、一次只动一个参数。操作序列总览： **Kd 置 0 → 升 Kp 至大幅低频抖动（临界）记值 → $K_p\times 0.6$ 回退 → 升 Kd 至高频尖叫前（临界）记值 → $K_d\times 0.6$ 回退** 。逐项说明如下。
 
-- **观测与记录** ：调参全程以串口状态行为观测依据（test10 起每 100ms 输出一行，如 `state=RUN theta=1.23 omega=-0.45 pwm=12`，test11 追加 `motion`/`speed`/`target`，test12 再追加 `omega_z`/`delta` 等字段）；每调一个参数记录"现象 → 参数 → 结果"一组，现象判定对照本文档末尾现象速查表。
+- **观测与记录** ：调参全程以串口状态行为观测依据（test10 起每 100ms 输出一行，如 `state=RUN theta=1.23 omega=-0.45 pwm=12`，test11 追加 `motion`/`speed`/`target`，test12 再追加 `omega_z`/`delta` 等字段；主固件沿用 test13 的字段集，并把基础 PWM 拆成 `pwm_L`/`pwm_R` 输出）；每调一个参数记录"现象 → 参数 → 结果"一组，现象判定对照本文档末尾现象速查表。
 
 - **机械中值** ：双手扶车，从后往前缓慢倾斜到恰好向前倾倒，记角度 1；再从前往后倾斜到临界，记角度 2；取平均即 $\theta_0$。本固件亦可扶直静止发 `'c'` 自动标定。
 - **Kp 极性** ：手扶车体前倾，轮子应向车头（前进）方向追；反则对调 `config.h` 中该电机 `PIN_A/PIN_B`（勿在代码里取负，见 1.6）。
@@ -1138,8 +1257,8 @@ $$\Delta = K_p\theta_{cmd} + K_d\omega_z,\qquad \text{稳态 } \Delta=0\Rightarr
 **修复** ：
 
 1. 库层 `update_pwm_turn`：`kp_*target_cmd - kd_*omega_z` → `kp_*target_cmd + kd_*omega_z`（`PIDController.cpp`）；
-2. `test12`/`test13`、`config.h`、`PIDController.h` 注释同步改符号；
-3. `test13` 角速度折算系数随稳态式取负：$\theta_{cmd} = -(K_d/K_p)\omega_{z,set}$（原 `+Kd/Kp` 会令遥控转向方向反转）；
+2. `test12`/`test13`/主固件、`config.h`、`PIDController.h` 注释同步改符号；
+3. `test13`/主固件 角速度折算系数随稳态式取负：$\theta_{cmd} = -(K_d/K_p)\omega_{z,set}$（原 `+Kd/Kp` 会令遥控转向方向反转）；
 4. 符号修好后，稳态 $\omega_z=(K_p/K_d)\cdot30°$，`Kp=0.75`、`Kd=0.2` 时约 112°/s 仍偏快，建议后续同步增大 `TURN_KD`（0.4~0.6）把稳态转速压到 40~60°/s。
 
 **判别实验** （区分"正反馈"与"Kp 过大"）：手扶车体，观察 $\omega_z$ 是否随转向 **单调发散** ——若 $\omega_z$ 持续单向增大至翻车（而非围绕某值振荡），即阻尼项正反馈；若 $\omega_z$ 围绕目标转速高频振荡，则是 Kp 过大/阻尼不足（调小 Kp 或加大 Kd）。两者最直观区别：正反馈是 **单调爬升** ，Kp 过大是 **振荡** 。

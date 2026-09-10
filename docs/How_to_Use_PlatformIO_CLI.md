@@ -1,6 +1,6 @@
 # PlatformIO 终端命令速查笔记
 
-> 整理日期：2026-07-30；最近更新：2026-08-06（网络配置分层方案 + src/ 子目录多固件隔离）  
+> 整理日期：2026-07-30；最近更新：2026-09-10（src/ 子目录多固件隔离示例对齐本仓库实际配置）  
 > 适用环境：Ubuntu 24.04 + VS Code + PlatformIO Core  
 > 核心原则：**终端命令与 VS Code 扩展调用的是同一套 PIO Core**，但终端可显式控制环境变量（如代理）。
 
@@ -111,23 +111,24 @@ pio run -e esp32-s3 --target upload
 > 参考项目：`~/Documents/PlatformIO_project/fishbot_motion_control`（鱼香ROS 书配套，
 > 仓库名 `YuxiangROS-PIO-learning`）
 
-**场景**：在 `src/` 下新建子目录写 demo（如 `src/wifi_test/main.cpp`），不动主程序 `src/main.cpp`。
+**场景**：在 `src/` 下新建子目录写 demo（如 `src/tests/test06_wifi/main.cpp`），不动主程序 `src/main.cpp`。
 **坑**：`src/` 下同时存在两个 `setup()`/`loop()` 会符号重复定义，链接失败。
 **解法**：`build_src_filter` 环境隔离 + 独立 env + `-e` 指定环境。以 fishbot 项目实际配置为例：
 
 ```ini
-; 主固件: 排除 wifi_test 目录, 保证只编译 src/main.cpp
+; 主固件: 排除全部示例/测试目录, 保证只编译 src/main.cpp
+; 注: build_src_filter 会整体替换默认规则, 故 "包含所有" 的 +<*> 必须显式写出
 [env:esp32-s3-devkitc-1]
-build_src_filter = +<*>-<wifi_test>
+build_src_filter = +<*> -<examples> -<tests>
 
-; 网络测试固件: 只编译 src/wifi_test/main.cpp, 与主固件互不干扰
-[env:esp32-s3-devkitc-1-wifi-test]
-build_src_filter = +<wifi_test>
+; 网络测试固件: 只编译 src/tests/test06_wifi/main.cpp, 与主固件互不干扰
+[env:test06_wifi]
+build_src_filter = +<tests/test06_wifi>
 ```
 
 ```bash
 # 只编译/烧录测试固件（重点: -e 指定 env 名）
-pio run -e esp32-s3-devkitc-1-wifi-test -t upload
+pio run -e test06_wifi -t upload
 
 # 编译/烧录主固件
 pio run -e esp32-s3-devkitc-1 -t upload

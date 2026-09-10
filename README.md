@@ -1,8 +1,9 @@
 # YuxiangROS-PIO-learning
 
 > 配套书籍：《ROS 2 机器人开发：从入门到实践》（桑欣 著，fishros 出品）。
-> 本仓库是第 9 章"实体机器人"的 ESP32-S3 两轮差速底盘运动控制固件：通过
-> micro-ROS 订阅 `/cmd_vel`，经运动学逆解与 PID 速度闭环驱动电机，并发布 `/odom`。
+> 本仓库是第 9 章"实体机器人"的 ESP32-S3 固件工程：主固件为两轮自平衡（倒立摆）
+> 运动控制，通过 micro-ROS 订阅 `/cmd_vel` 与 `/balance_enable`，经速度环 PI 与
+> 直立环 PD 串级输出 PWM 驱动电机，并发布 `/odom`；同一主控兼任雷达透传。
 > 特色：原书每小节直接在上小节代码上改、没有整合工程；本仓库把各小节散落的
 > 代码块切片为 15 个独立可编译工程（examples / tests / main），便于对照原书逐节阅读。
 > 仓库名 PIO 即 PlatformIO（下位机固件侧），与主仓库
@@ -33,15 +34,21 @@
 ## 项目简介
 
 固件运行在 ESP32-S3（PlatformIO + Arduino framework）上，与上位机（ROS 2 Jazzy）
-通过 WiFi + micro-ROS 通信：
+通过 WiFi + micro-ROS 通信。车体为两轮自平衡（倒立摆）结构，控制为三环串级：
 
-1. 订阅 `/cmd_vel`（`geometry_msgs/msg/Twist`）速度指令；
-2. 运动学逆解将车体速度转为左右轮目标转速（纯算法库 `Kinematics`）；
-3. PID 速度闭环输出 PWM 驱动电机（纯算法库 `PIDController`）；
-4. 编码器读数积分里程计，50 ms 周期发布 `/odom`（`nav_msgs/msg/Odometry`）。
+1. 订阅 `/cmd_vel`（`geometry_msgs/msg/Twist`）速度指令与 `/balance_enable`
+   （`std_msgs/msg/Bool`）武装开关；
+2. 直立环 PD 以 MPU6050 的倾角与角速度为反馈输出基础 PWM，是唯一直接驱动电机的环；
+3. 速度环 PI 以编码器测速经运动学正解得到的车体速度为反馈，输出期望倾角增量，
+   与机械中值相加得到直立环目标角（纯算法库 `PIDController`、`Kinematics`）；
+4. 转向环按目标偏航角速度输出差模 PWM，与基础 PWM 相减得到左右轮占空比；
+5. 编码器读数积分里程计，50 ms 周期发布 `/odom`（`nav_msgs/msg/Odometry`）。
 
 ```text
-/cmd_vel (Twist) -> 逆解 -> 目标轮速 -> PID -> PWM -> 电机+编码器 -> 里程计 -> /odom
+外环: /cmd_vel (Twist) -> 速度环 PI -> 目标倾角
+内环: 目标倾角 + MPU6050 倾角/角速度 -> 直立环 PD -> 基础 PWM
+转向: /cmd_vel (Twist) -> 转向环 -> 差模 PWM
+合成: 基础 PWM ± 差模 PWM -> 左右轮 PWM -> 电机 + 编码器 -> 里程计积分 -> /odom
 ```
 
 ## 与原书的对应关系
@@ -67,7 +74,9 @@
 | 9.5.1 驱动并显示雷达点云       | `tests/test09_bridge`、主固件 `bridge_task`        | 雷达透传 + 电机 PWM        |
 
 > 说明：9.2.1（平台介绍）不涉及代码；9.3.2 同时覆盖"速度测量"与"速度转换"两段代码，
-> 故映射两个切片；主固件是 9.3.5 与 9.4.3 的收敛（内嵌里程计 + 发布 `/odom`）；
+> 故映射两个切片；主固件是 9.3.5 与 9.4.3 的收敛（内嵌里程计 + 发布 `/odom`），
+> 亦是平衡车系列 test10 至 test13 的收敛（直立环 + 速度环 + 转向环 + 无线遥控），
+> 并把 test09 的雷达透传并入 `bridge_task`；
 > 9.5.1 原书用独立转接板（ESP8266）透传雷达，本仓库由 ESP32-S3 兼任，无独立转接板
 > 切片，详见「激光雷达转接」节。
 
@@ -85,13 +94,18 @@
 | Tx                  | GPIO14（UART1 RX）  | 数据仅雷达到主控 |
 | M_CTR               | GPIO13（LEDC PWM）  | 电机调速端       |
 
+| MPU6050（I2C） | 接到 ESP32-S3 | 说明                   |
+| -------------- | ------------- | ---------------------- |
+| SDA            | GPIO10        | 姿态数据 `IMU_SDA_PIN` |
+| SCL            | GPIO9         | 时钟 `IMU_SCL_PIN`     |
+
 | 项目     | 配置                                                                    |
 | -------- | ----------------------------------------------------------------------- |
 | 主控     | ESP32-S3-DevKitC-1（Xtensa LX7，Arduino framework）                     |
 | 电机驱动 | `Esp32McpwmMotor`（MCPWM）                                              |
 | 编码器   | `Esp32PcntEncoder`（PCNT 脉冲计数）                                     |
 | 通信     | micro-ROS over WiFi（UDP），Agent 地址见 `include/RobotConfig/config.h` |
-| 控制周期 | 主循环 10 ms，里程计发布 50 ms                                          |
+| 控制周期 | 直立控制任务 5 ms（200 Hz），里程计发布 50 ms，`loop()` 空转 1 s        |
 
 > 硬件差异：原书使用 Adafruit Feather 开发板，本仓库改用 ESP32-S3-DevKitC-1。
 > 固件与板型解耦，换板只需改 `platformio.ini` 的 `board` 与引脚——证明可灵活变通。
@@ -149,7 +163,7 @@ YuxiangROS-PIO-learning/
 │   ├── MPU6050_light/           # 第三方：IMU 姿态解算（gitignore，不入库）
 │   └── micro_ros_platformio/    # 第三方：micro-ROS（gitignore，不入库）
 ├── src/
-│   ├── main.cpp                 # 主固件：micro-ROS 运动控制 + 激光雷达透传（单板融合）
+│   ├── main.cpp                 # 主固件：两轮自平衡运动控制 + 激光雷达透传（单板融合）
 │   ├── examples/                # 4 个示例固件（example01~04）
 │   └── tests/                   # 13 个测试固件（test01~09 与平衡车系列 test10_upright、test11_speed、test12_turn、test13_balance）
 ├── docs/                        # 学习笔记与调试记录（含激光雷达接入全流程）
@@ -162,12 +176,12 @@ YuxiangROS-PIO-learning/
 4 个第三方库均已本地化到 `lib/`（各环境共享源码、保留 `.git` 追溯上游，目录整体被
 `.gitignore` 忽略、不入库），来源列仅供追溯上游：
 
-| 库                   | 用途            | 来源                                                       | 使用环境                                                             |
-| -------------------- | --------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)      | 主环境、test01/03/04/05/06/07/08/10/11/12/13                         |
-| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)     | 主环境、test02/03/04/05/06/07/08/11/12/13                            |
-| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio) | 主环境、test06/07/08/13                                              |
-| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)        | example04、test10_upright、test11_speed、test12_turn、test13_balance |
+| 库                   | 用途            | 来源                                                       | 使用环境                                                                     |
+| -------------------- | --------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Esp32McpwmMotor      | MCPWM 电机驱动  | [fishros](https://github.com/fishros/Esp32McpwmMotor)      | 主环境、test01/03/04/05/06/07/08/10/11/12/13                                 |
+| Esp32PcntEncoder     | PCNT 编码器读取 | [fishros](https://github.com/fishros/Esp32PcntEncoder)     | 主环境、test02/03/04/05/06/07/08/11/12/13                                    |
+| micro_ros_platformio | micro-ROS 支持  | [fishros](https://github.com/fishros/micro_ros_platformio) | 主环境、test06/07/08/13                                                      |
+| MPU6050_light        | IMU 姿态解算    | [rfetick](https://github.com/rfetick/MPU6050_light)        | 主环境、example04、test10_upright、test11_speed、test12_turn、test13_balance |
 
 > 为何用 fishros 预编译镜像：官方
 > [micro-ROS/micro_ros_platformio](https://github.com/micro-ROS/micro_ros_platformio)
@@ -190,26 +204,26 @@ pio device monitor -b 115200
 pio run -e test01_motor -t upload
 ```
 
-| 类型   | 环境名               | 说明                                                                                    |
-| ------ | -------------------- | --------------------------------------------------------------------------------------- |
-| 主固件 | esp32-s3-devkitc-1   | 运动控制 + 激光雷达透传（micro-ROS `/cmd_vel`、`/odom` + bridge_task）                  |
-| 示例   | example01_helloworld | Hello World                                                                             |
-| 示例   | example02_LED        | LED 闪烁                                                                                |
-| 示例   | example03_Ultrasound | 超声波测距                                                                              |
-| 示例   | example04_IMU        | MPU6050 姿态解算                                                                        |
-| 测试   | test01_motor         | 电机驱动测试                                                                            |
-| 测试   | test02_encoder       | 编码器读取与标定                                                                        |
-| 测试   | test03_speed_trans   | 速度换算测试                                                                            |
-| 测试   | test04_PID           | PID 速度闭环测试                                                                        |
-| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                                                               |
-| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                                                                 |
-| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                                          |
-| 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                                          |
-| 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                                          |
-| 测试   | test10_upright       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md）                  |
-| 测试   | test11_speed         | 两轮自平衡串级：速度环 PI + 直立环 PD（阶段二；详见 docs/Balance_Car_Notes.md）         |
-| 测试   | test12_turn          | 两轮自平衡转向：转向环差模叠加（阶段三；详见 docs/Balance_Car_Notes.md）                |
-| 测试   | test13_balance       | 两轮自平衡无线操控：micro-ROS + WiFi 键盘遥控（阶段四；详见 docs/Balance_Car_Notes.md） |
+| 类型   | 环境名               | 说明                                                                                                                                        |
+| ------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 主固件 | esp32-s3-devkitc-1   | 两轮自平衡控制 + 激光雷达透传：订阅 `/cmd_vel`、`/balance_enable`，发布 `/odom`，内嵌 bridge_task（阶段五；详见 docs/Balance_Car_Notes.md） |
+| 示例   | example01_helloworld | Hello World                                                                                                                                 |
+| 示例   | example02_LED        | LED 闪烁                                                                                                                                    |
+| 示例   | example03_Ultrasound | 超声波测距                                                                                                                                  |
+| 示例   | example04_IMU        | MPU6050 姿态解算                                                                                                                            |
+| 测试   | test01_motor         | 电机驱动测试                                                                                                                                |
+| 测试   | test02_encoder       | 编码器读取与标定                                                                                                                            |
+| 测试   | test03_speed_trans   | 速度换算测试                                                                                                                                |
+| 测试   | test04_PID           | PID 速度闭环测试                                                                                                                            |
+| 测试   | test05_Kinematics    | 运动学逆解 + PID 控制测试                                                                                                                   |
+| 测试   | test06_wifi          | micro-ROS WiFi 连接测试                                                                                                                     |
+| 测试   | test07_Subscription  | `/cmd_vel` 订阅 + 运动控制测试                                                                                                              |
+| 测试   | test08_Publisher     | `/cmd_vel` 订阅 + `/odom` 发布（原主固件迁移）                                                                                              |
+| 测试   | test09_bridge        | 雷达 UART→WiFi TCP 透传（ESP32-S3 兼任转接板）                                                                                              |
+| 测试   | test10_upright       | 两轮自平衡直立环 PD（MPU6050，阶段一；详见 docs/Balance_Car_Notes.md）                                                                      |
+| 测试   | test11_speed         | 两轮自平衡串级：速度环 PI + 直立环 PD（阶段二；详见 docs/Balance_Car_Notes.md）                                                             |
+| 测试   | test12_turn          | 两轮自平衡转向：转向环差模叠加（阶段三；详见 docs/Balance_Car_Notes.md）                                                                    |
+| 测试   | test13_balance       | 两轮自平衡无线操控：micro-ROS + WiFi 键盘遥控（阶段四；详见 docs/Balance_Car_Notes.md）                                                     |
 
 ## 运行与联调
 
@@ -221,13 +235,22 @@ pio run -e test01_motor -t upload
    ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
    ```
 
-4. 发布速度指令驱动底盘：
+4. 触发起控：`/balance_enable` 置 true 且倾角进入机械中值窗口后进入 RUN 并输出 PWM，
+   置 false 立即停机（`/cmd_vel` 在停止状态下不产生任何输出）：
+
+   ```bash
+   ros2 topic pub --once /balance_enable std_msgs/msg/Bool "{data: true}"
+   ```
+
+   串口发送 `s` 等价于翻转该开关，`c` 在停止状态下标定机械中值。
+
+5. 发布速度指令驱动底盘：
 
    ```bash
    ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.2}, angular: {z: 0.0}}" -r 10
    ```
 
-5. 查看里程计：`ros2 topic echo /odom`
+6. 查看里程计：`ros2 topic echo /odom`
 
 WiFi 局域网的搭建演进（普通路由器 → 手机热点 → 电脑网卡热点）、各层原理
 （2.4/5 GHz 频段、802.11 二层隔离、IP 网段、UDP/TCP）与按层排障速查，见
@@ -238,14 +261,18 @@ WiFi 局域网的搭建演进（普通路由器 → 手机热点 → 电脑网�
 ## 激光雷达转接（与原书不同的路）
 
 第 9 章原书用独立转接板（鱼香ROS `fishbot-laser-control`，ESP8266 + `uart2udp.bin`）
-完成雷达 UART→WiFi 透传与电机 PWM 调速。本仓库**不买转接板**，改由运动控制
-主控 ESP32-S3 兼任（LEDC PWM 驱动雷达电机），并遵守与原转接板相同的接口契约
+完成雷达 UART→WiFi 透传与电机 PWM 调速。本仓库**不买转接板**，改由主固件所在的
+ESP32-S3 兼任（LEDC PWM 驱动雷达电机），并遵守与原转接板相同的接口契约
 （TCP client 主动连上位机 8889），上位机零改动即可替换。接线：雷达 Tx → GPIO14
 （UART1 RX，115200）、M_CTR → GPIO13（PWM 10kHz）。
 
 阶段一透传调试记录与阶段二建图 / 导航完整流程（上位机 / 下位机两侧仓库、
 各终端启动顺序、原书代码清单 9-55~9-66 对照、参数适配与排错），统一见
 [docs/Lidar_Radar_Debugging.md](docs/Lidar_Radar_Debugging.md)。
+
+透传与平衡控制并入同一固件时按核分工：`balance_task` 钉 core1 保证 5 ms 控制节拍，
+`bridge_task` 钉 core0 与 WiFi 协议栈同核；`bridge_task` 只等待网络就绪，
+不重复 `WiFi.begin()`，避免打断 micro-ROS 的 UDP 会话。
 
 ## 自主优化
 

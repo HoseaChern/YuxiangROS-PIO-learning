@@ -6,7 +6,7 @@ RobotConfig 是 YuxiangROS-PIO-learning(ESP32-S3, PlatformIO)项目中的共用�
 收纳 `src/main.cpp` 与 `src/tests/`(test01 至 test13)各固件共用的"环境相关、经常调整"的常量：
 
 - **硬件接线**：电机/编码器引脚、IMU I2C 引脚、雷达串口与调速引脚；
-- **标定参数**：PID 系数（直立环/速度环）、运动学轮距与脉冲当量、默认目标速度、机械中值；
+- **标定参数**：PID 系数（直立环/速度环/转向环）、运动学轮距与脉冲当量、默认目标速度、机械中值；
 - **部署环境**：WiFi 凭据、micro-ROS Agent 的 IP 与端口、网络拓扑模式（STA 接入 / AP 自组网）；
 - **通用参数**：串口波特率、控制周期、单位换算、任务/发布/时间同步、话题与节点名。
 
@@ -44,12 +44,12 @@ RobotConfig 将之统一收纳，`config.h` 不入版本库，使配置调整与
 | WiFi 凭据  | `WIFI_SSID`、`WIFI_PASS`                                                                                                                                                         | STA 模式 WiFi 账号密码（可写数组）                                     |
 | 任务参数   | `MICRO_ROS_STACK_SIZE`、`MICRO_ROS_TASK_PRIO`、`TRANSPORT_SETUP_MS`、`ODOM_PUBLISH_MS`、`SYNC_ATTEMPT_MS`、`SYNC_POLL_MS`                                                        | 任务栈、发布周期、时间同步                                             |
 | 话题与节点 | `CMD_VEL_TOPIC`、`NODE_NAME`、`ODOM_TOPIC`                                                                                                                                       | ROS 图元素名称                                                         |
-| IMU 与任务 | `IMU_SDA_PIN`、`IMU_SCL_PIN`、`BALANCE_PERIOD_MS`、`BALANCE_STACK_SIZE`、`BALANCE_TASK_PRIO`、`BALANCE_TASK_CORE`                                                                | test10/test11 I2C 引脚与控制任务参数                                   |
+| IMU 与任务 | `IMU_SDA_PIN`、`IMU_SCL_PIN`、`BALANCE_PERIOD_MS`、`BALANCE_STACK_SIZE`、`BALANCE_TASK_PRIO`、`BALANCE_TASK_CORE`                                                                | test10 至 test13 与主固件的 I2C 引脚与直立控制任务参数                 |
 | 直立环参数 | `UPRIGHT_KP`、`UPRIGHT_KI`、`UPRIGHT_KD`、`UPRIGHT_PWM_LIMIT`、`UPRIGHT_ZERO_PITCH_DEG`                                                                                          | 直立环 PD 标定与机械中值                                               |
 | 安全与标定 | `UPRIGHT_ARM_ANGLE_DEG`、`UPRIGHT_FALL_ANGLE_DEG`、`UPRIGHT_CALM_DELAY_MS`、`UPRIGHT_CALIB_CYCLES`、`BALANCE_PRINT_MS`                                                           | 起控/倒地保护阈值、中值标定、打印周期                                  |
-| 速度环参数 | `SPEED_KP`、`SPEED_KI`、`SPEED_OUTPUT_LIMIT`、`SPEED_SETPOINT_MM_S`、`SPEED_STEP_MM_S`                                                                                           | test11 速度环 PI 标定与串口调速步进                                    |
-| 雷达转接   | `LIDAR_UART_RX_PIN`、`LIDAR_MOTOR_CTRL_PIN`、`LIDAR_BAUD`、`LIDAR_PWM_FREQ`、`LIDAR_PWM_RES`、`LIDAR_PWM_CHANNEL`、`LIDAR_MOTOR_SPEED`、`BRIDGE_TCP_PORT`、`BRIDGE_RECONNECT_MS` | test09 激光雷达透传参数                                                |
-| 桥接任务   | `BRIDGE_STACK_SIZE`、`BRIDGE_TASK_PRIO`                                                                                                                                          | 主环境 bridge_task 任务参数                                            |
+| 速度环参数 | `SPEED_KP`、`SPEED_KI`、`SPEED_OUTPUT_LIMIT`、`SPEED_SETPOINT_MM_S`、`SPEED_STEP_MM_S`                                                                                           | test11 与主固件的速度环 PI 标定，串口调速步进为 test11 专用            |
+| 雷达转接   | `LIDAR_UART_RX_PIN`、`LIDAR_MOTOR_CTRL_PIN`、`LIDAR_BAUD`、`LIDAR_PWM_FREQ`、`LIDAR_PWM_RES`、`LIDAR_PWM_CHANNEL`、`LIDAR_MOTOR_SPEED`、`BRIDGE_TCP_PORT`、`BRIDGE_RECONNECT_MS` | test09 与主固件的激光雷达透传参数                                      |
+| 桥接任务   | `BRIDGE_STACK_SIZE`、`BRIDGE_TASK_PRIO`、`BRIDGE_TASK_CORE`                                                                                                                      | 主固件 bridge_task 任务参数（core0，与 WiFi 协议栈同核）               |
 
 > 说明：`WIFI_SSID`/`WIFI_PASS` 由原 `lib/Secrets` 合并而来，须为可写 `char` 数组，
 > 因 `set_microros_wifi_transports` 接口要求 `char*`，不能声明为 `constexpr`。
@@ -58,8 +58,9 @@ RobotConfig 将之统一收纳，`config.h` 不入版本库，使配置调整与
 
 ### 不收纳
 
-- `EXECUTOR_HANDLES`：micro-ROS 执行器句柄数，按各固件订阅/定时器数量取值（main=2 / test06=1 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1），保留在各固件本地定义。
-- `BalanceState`：test10/test11 的两轮自平衡状态机枚举（`kIdle`/`kRunning`），属行为逻辑而非配置数据，且仅两个固件使用，保留在各固件本地定义。
+- `EXECUTOR_HANDLES`：micro-ROS 执行器句柄数，按各固件订阅/定时器数量取值（main=3 / test06=1 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1），保留在各固件本地定义。
+- `BALANCE_NODE_NAME`：平衡车固件（main / test13）的 micro-ROS 节点名 `fishbot_balance`，与 `NODE_NAME`（test06/07/08 使用）区分，保留在各固件本地定义。
+- `BalanceState`：test10 至 test13 与主固件的两轮自平衡状态机枚举（`kIdle`/`kRunning`），属行为逻辑而非配置数据，保留在各固件本地定义。
 
 ## 4. 使用流程
 

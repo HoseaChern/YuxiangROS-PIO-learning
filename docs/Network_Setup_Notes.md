@@ -460,12 +460,17 @@ PLATFORMIO_BUILD_FLAGS="-DWIFI_ROLE_AP=1" pio run -e test06_wifi -t upload
 [micro_ros] node "fishbot_motion_control" ready, spinning
 ```
 
-若换烧发布/订阅型固件（主固件、test13），做话题级验证：
+上列串口日志取自 test06，其节点名为 `fishbot_motion_control`（`NODE_NAME`）；
+主固件与 test13 的节点名为 `fishbot_balance`（各固件本地定义的 `BALANCE_NODE_NAME`）。
+若换烧发布/订阅型固件（主固件、test08、test13），做话题级验证：
 
 ```bash
-ros2 topic hz /odom          # 主固件: 期望约 20 Hz
-ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # test13
+ros2 topic hz /odom                                                   # 主固件: 期望约 20 Hz
+ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # 主固件 / test13
 ```
+
+注意主固件与 test13 只在武装（`/balance_enable` 为 true）后输出 PWM，
+`/cmd_vel` 本身不触发运动。
 
 ### 3.4 排障速查（操作级，按层自底向上）
 
