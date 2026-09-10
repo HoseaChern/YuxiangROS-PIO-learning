@@ -10,6 +10,9 @@
   源码以短名 include (如 `#include "SemanticEnums.h"`), 需要子目录级 -I 才能解析,
   但 ccdb 缺失, 导致 clangd 报 'SemanticEnums.h' file not found.
   此处对缺失条目统一补齐。
+另一缺陷: 头文件本身无编译条目, clangd 为直接打开的头文件任选环境条目作
+解析上下文, 选中不含 WiFi 的环境时, net_boot.h 误报 'WiFi.h' file not found,
+故按 HEADER_ENTRY_HOSTS 以宿主源文件条目克隆出头文件专属条目。
 """
 
 import glob
@@ -21,6 +24,14 @@ TOOLCHAIN = os.path.expanduser("~/.platformio/packages/toolchain-xtensa-esp32s3/
 # include/ 下纯头文件子库: 源码以短名引用, PIO 只注入 -I include 顶层而不带子目录,
 # 故 compiledb 漏注入; 路径相对仓库根, 随条目的 directory 解析
 HEADER_ONLY_LIBS = ("include/SemanticEnums", "include/RobotConfig", "include/NetBoot")
+# 头文件条目宿主: 键为缺条目的头文件, 值为提供解析上下文的源文件
+# (其编译条目含该头文件所需全部 include 路径)
+HEADER_ENTRY_HOSTS = {
+    "include/NetBoot/net_boot.h": "src/main.cpp",
+    "include/RobotConfig/config.h": "src/main.cpp",
+    "include/RobotConfig/config.example.h": "src/main.cpp",
+    "include/SemanticEnums/SemanticEnums.h": "src/main.cpp",
+}
 
 
 def main() -> None:
@@ -43,6 +54,16 @@ def main() -> None:
             if e["file"] not in seen:
                 seen.add(e["file"])
                 out.append(e)
+    for header, host in HEADER_ENTRY_HOSTS.items():
+        if header in seen:
+            continue
+        host_entry = next((e for e in out if e["file"] == host), None)
+        if host_entry is None:
+            continue
+        clone = dict(host_entry)
+        clone["file"] = header
+        out.append(clone)
+        seen.add(header)
     with open(os.path.join(REPO, "compile_commands.json"), "w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=2)
     print(f"merged {len(out)} entries from {len(ccdbs)} envs")
