@@ -784,16 +784,14 @@ int16_t PIDController::update_pwm_turn(float target_cmd, float omega_z) {
 }
 ```
 
-配置在 `configure_turn_pid` 中装载 **一组** 完整三元组（命名风格同速度环 `SPEED_KP/SPEED_KI/SPEED_KD`）：`TURN_KP`（指令项系数）、`TURN_KD`（阻尼系数）、`TURN_KI` 恒 0 占位，输出限幅统一为 `TURN_PWM_LIMIT`。
+`setup()` 中直接为 `turn_pid` 装载 **一组** 完整三元组（命名风格同速度环 `SPEED_KP/SPEED_KI/SPEED_KD`）：`TURN_KP`（指令项系数）、`TURN_KD`（阻尼系数）、`TURN_KI` 恒 0 占位，输出限幅统一为 `TURN_PWM_LIMIT`。
 
 **工程调用** （`src/tests/test12_turn/main.cpp`）：
 
 ```cpp
-void configure_turn_pid() {
-    turn_pid.reset();
-    turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD); // 单一转向环三元组 (无模式)
-    turn_pid.output_limit(TURN_PWM_LIMIT);
-}
+// setup: 单一三元组, 指令项与阻尼项一次调用完成, 无模式切换
+turn_pid.update_pid(TURN_KP, TURN_KI, TURN_KD);
+turn_pid.output_limit(TURN_PWM_LIMIT);
 
 // 每 5ms 控制周期: 共模串级同 test11, 另取 Z 轴角速度与目标转角作差模输入
 const float omega_z = mpu.getGyroZ();
@@ -870,7 +868,7 @@ $$
 
 #### 7.3 并发模型与安全
 
-- 通信与控制分核运行：`micro_ros_task`（默认核，优先级 1，executor 回调）经临界区写指令变量；`balance_task`（core1，优先级 5，5 ms/200 Hz 节拍）在临界区内读指令快照后执行三环控制。共享变量 `cmd_linear_mps` / `cmd_angular_rps` / `cmd_enable` 为跨核非原子 float，一律由 `portMUX_TYPE` 临界区保护，避免跨核数据竞争；
+- 通信与控制分核运行：`micro_ros_task`（默认核，优先级 1，executor 回调）经临界区写指令变量；`balance_task`（core1，优先级 5，5 ms/200 Hz 节拍）在临界区内读指令快照后执行三环控制。共享变量 `cmd_linear_mps` / `cmd_angular_rps`（float）与 `cmd_enable`（bool）为跨核非原子变量，一律由 `portMUX_TYPE` 临界区保护，避免跨核数据竞争；
 - 会话安全：micro-ROS Agent 断开（spin 返回错误）自动请求解除武装，防止失控时小车携带指令奔跑；
 - 倒地保护沿用 test12：$|\theta - \theta_0| > 45^\circ$ 自动停机；
 - 串口保留 `s`/`c` 作为调试后备（字符集与 test10/11/12 一致），无 WiFi/Agent 时仍可独立操控：`s` 武装/解除（等价翻转 `/balance_enable`），`c` 标定机械中值（仅 `kIdle` 生效，非阻塞逐周期采样）。
@@ -879,31 +877,32 @@ $$
 
 #### 8.1 工程配置与依赖
 
-| 项             | 值                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------- |
-| 环境           | `[env:test13_balance]`                                                                 |
-| 源码过滤       | `build_src_filter = +<tests/test13_balance>`                                           |
-| micro-ROS 传输 | `board_microros_transport = wifi`                                                      |
-| 依赖库         | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`micro_ros_platformio`、`WiFi` |
+| 项             | 值                                                                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 环境           | `[env:test13_balance]`                                                                                                                                                            |
+| 源码过滤       | `build_src_filter = +<tests/test13_balance>`                                                                                                                                      |
+| micro-ROS 传输 | `board_microros_transport = wifi`                                                                                                                                                 |
+| 依赖库         | `Esp32McpwmMotor`、`Esp32PcntEncoder`、`MPU6050_light`、`Kinematics`、`PIDController`、`SemanticEnums`、`micro_ros_platformio`、`WiFi`、`NetBoot`（`include/NetBoot/net_boot.h`） |
 
 `platformio.ini` 公共段默认 `lib_ignore = micro_ros_platformio`（避免其他环境触发 micro-ROS 钩子），`test13_balance` 用空 `lib_ignore =` 覆盖解除，与主环境、`test06/07/08` 保持一致。
 
 #### 8.2 初始化与数据流
 
-- WiFi 与 Agent：`set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT)`，Agent 地址由 `IPAddress.fromString(ROS_AGENT_IP)` 解析；
-- micro-ROS：`rclc_support_init` → `rclc_node_init_default` → `rclc_executor_init`（2 个订阅句柄）→ 两个 best-effort 订阅（`/cmd_vel`、`/balance_enable`）→ `rclc_executor_spin`；
-- 指令流：Twist 回调把 `linear.x`、`angular.z` 换算限幅后经临界区写入 `cmd_linear_mps` / `cmd_angular_rps`；Bool 回调把 `cmd_enable` 置位；`control_step` 每周期读快照后执行三环控制。
+- WiFi 与 Agent：`wifi_role_boot(agent_ip)`（`include/NetBoot/net_boot.h`）按 `WIFI_ROLE_AP` 分流——STA 模式内部调 `set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT)`，AP 模式开启 SoftAP 后注册同构纯 UDP transport；Agent 地址由 `agent_ip.fromString(AGENT_IP_STR)` 解析；
+- micro-ROS：`rclc_support_init` → `rclc_node_init_default` → `rclc_executor_init`（2 个订阅句柄）→ 两个 best-effort 订阅（`/cmd_vel`、`/balance_enable`）→ 循环 `rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10))`；
+- 指令流：Twist 回调经临界区写入原始 `cmd_linear_mps`（m/s）与 `cmd_angular_rps`（rad/s），临界区内仅赋值以缩短关窗时间；Bool 回调经临界区置 `cmd_enable`；`control_step` 每周期在临界区读快照后完成换算限幅（m/s → mm/s、rad/s → deg/s，见 7.1），再执行三环控制。
 
 #### 8.3 上位机操作步骤
 
-```bash
-# 终端 1: 启动 micro-ROS Agent (UDP)
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+前置步骤（网络拓扑搭建与 micro-ROS Agent 启动，Agent 绑 0.0.0.0 于
+`AGENT_PORT` 8888）见 `docs/Network_Setup_Notes.md` 第 3 节，本文不再重复；
+下述命令默认网络与 Agent 已就绪。
 
-# 终端 2: 武装
+```bash
+# 终端 1: 武装
 ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5
 
-# 终端 3: 键盘遥控 (可加 --ros-args -p linear.x:=0.2 降速)
+# 终端 2: 键盘遥控 (可加 --ros-args -p linear.x:=0.2 降速)
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
@@ -911,7 +910,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
 #### 8.4 调参与联调要点
 
-1. 先确认 WiFi 连接与 Agent 握手：串口打印 `client connected` 表示传输层就绪，再发 `s` 或 `/balance_enable` 武装；
+1. 先确认 WiFi 连接与 Agent 握手：固件侧串口打印 `[WiFi] connected, local IP=...`（AP 模式为 `[WiFi] softAP ... ready`）表示网络就绪，主机侧 `ros2 topic info /cmd_vel` 出现固件订阅端点表示会话建立，再发 `s` 或 `/balance_enable` 武装；
 2. 无 Agent 时小车不可无线遥控，串口 `s`/`c` 后备仍可用；
 3. 转向符号：若实测左右反向，对 `angular.z` 取负（差速符号校验见总纲转向环整定）；
 4. 限幅参数在 `config.h` 无线操控区调整；`CMD_MAX_LINEAR_MM_S` 保守调低可减少起步横摆冲击。
