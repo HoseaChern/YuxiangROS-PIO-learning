@@ -112,9 +112,6 @@
   对所有环境忽略 micro-ROS，其 `extra_script.py` 构建钩子（注入宏、链接预编译
   `libmicroros`）只在真正使用它的环境执行；主环境、test06/07/08/test13 用空
   `lib_ignore =` 覆盖解除。
-- **IntelliSense 兜底 include**：公共段
-  `-I${PROJECT_DIR}/lib/MPU6050_light/src` 指向本地化后的 IMU 库头文件，保证任何
-  激活环境下 IDE 都能解析该头（编译层面多余但无害）。
 - **配置与凭据分离**：引脚、标定参数、WiFi 凭据、Agent IP/端口等共用编译期常量
   集中于 `include/RobotConfig/config.h`（本地副本，不入库），模板见 `config.example.h`；
   调整硬件接线/部署环境不会污染 git 工作区。

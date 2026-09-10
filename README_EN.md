@@ -129,10 +129,6 @@ buildable projects, one-to-one:
   (injects macros, links the prebuilt `libmicroros`) runs only where micro-ROS is
   actually used; main and test06/07/08/test13 override it with an empty
   `lib_ignore =`.
-- **IntelliSense fallback include**: the common section adds
-  `-I${PROJECT_DIR}/lib/MPU6050_light/src` pointing at the localized IMU library
-  header, so the IDE can resolve it under any active environment (harmless for
-  compilation).
 - **Config & credential separation**: shared compile-time constants (pins,
   calibration, WiFi credentials, Agent IP/port, etc.) live in
   `include/RobotConfig/config.h` (local copy, not in the repo); the template is
