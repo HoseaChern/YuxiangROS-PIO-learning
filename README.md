@@ -232,10 +232,11 @@ pio run -e test01_motor -t upload
 
 5. 查看里程计：`ros2 topic echo /odom`
 
-WiFi 局域网的搭建演进（普通路由器 → 手机热点 → 电脑网卡热点）与各层原理
-（2.4/5 GHz 频段、802.11 二层隔离、IP 网段、UDP/TCP），以及 `nmcli` 常用指令
-与按层排障速查，统一见
-[docs/Network_Setup_Notes.md](docs/Network_Setup_Notes.md)。
+WiFi 局域网的搭建演进（普通路由器 → 手机热点 → 电脑网卡热点）、各层原理
+（2.4/5 GHz 频段、802.11 二层隔离、IP 网段、UDP/TCP）与按层排障速查，见
+[docs/Network_Setup_Notes.md](docs/Network_Setup_Notes.md)；NetworkManager 对象
+模型、`nmcli` 常用指令与维护手段，见
+[docs/About_NetworkManager.md](docs/About_NetworkManager.md)。
 
 ## 激光雷达转接（与原书不同的路）
 

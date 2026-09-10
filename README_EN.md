@@ -91,20 +91,20 @@ buildable projects, one-to-one:
 | Motor PWM | GPIO 5 / 4             | GPIO 6 / 7              |
 | Encoder   | GPIO 16 / 15           | GPIO 17 / 18            |
 
-| Lidar (YDLidar X2L) | Connected to ESP32-S3 | Description         |
-| ------------------- | --------------------- | ------------------- |
-| VCC                 | 5V power (>=1A)       | supply positive     |
-| GND                 | GND                   | supply ground       |
-| Tx                  | GPIO14 (UART1 RX)     | lidar -> MCU only   |
-| M_CTR               | GPIO13 (LEDC PWM)     | motor speed control |
+| Lidar (YDLidar X2L) | Connected to ESP32-S3        | Description         |
+| ------------------- | ---------------------------- | ------------------- |
+| VCC                 | 5V power (independent, >=1A) | supply positive     |
+| GND                 | GND                          | supply ground       |
+| Tx                  | GPIO14 (UART1 RX)            | lidar -> MCU only   |
+| M_CTR               | GPIO13 (LEDC PWM)            | motor speed control |
 
-| Item            | Configuration                                                 |
-| --------------- | ------------------------------------------------------------- |
-| MCU             | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)            |
-| Motor driver    | `Esp32McpwmMotor` (MCPWM)                                     |
-| Encoder reading | `Esp32PcntEncoder` (PCNT pulse counting)                      |
-| Communication   | micro-ROS over WiFi (UDP), default Agent `192.168.2.120:8888` |
-| Control period  | 10 ms main loop, 50 ms odometry publishing                    |
+| Item            | Configuration                                                              |
+| --------------- | -------------------------------------------------------------------------- |
+| MCU             | ESP32-S3-DevKitC-1 (Xtensa LX7, Arduino framework)                         |
+| Motor driver    | `Esp32McpwmMotor` (MCPWM)                                                  |
+| Encoder reading | `Esp32PcntEncoder` (PCNT pulse counting)                                   |
+| Communication   | micro-ROS over WiFi (UDP), Agent address in `include/RobotConfig/config.h` |
+| Control period  | 10 ms main loop, 50 ms odometry publishing                                 |
 
 > Hardware note: the book uses an Adafruit Feather board; this repo uses an
 > ESP32-S3-DevKitC-1 instead. The firmware is decoupled from the board, so
@@ -254,9 +254,11 @@ pio run -e test01_motor -t upload
 
 For WiFi LAN setup — the evolution across a regular router, a phone hotspot, and
 the PC wireless-card hotspot (current solution), the per-layer theory (2.4/5 GHz
-bands, 802.11 layer-2 isolation, IP subnet, UDP/TCP), the common `nmcli` commands,
-and a layer-by-layer troubleshooting quick reference — see
-[docs/Network_Setup_Notes.md](docs/Network_Setup_Notes.md).
+bands, 802.11 layer-2 isolation, IP subnet, UDP/TCP), and a layer-by-layer
+troubleshooting quick reference — see
+[docs/Network_Setup_Notes.md](docs/Network_Setup_Notes.md). For the
+NetworkManager object model, common `nmcli` commands, and maintenance, see
+[docs/About_NetworkManager.md](docs/About_NetworkManager.md).
 
 ## Lidar Radar Passthrough (a different path from the book)
 

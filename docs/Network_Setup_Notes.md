@@ -4,6 +4,40 @@
 
 本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证）。
 
+## 目录
+
+- [上位机 WiFi 局域网配置笔记](#上位机-wifi-局域网配置笔记)
+  - [目录](#目录)
+  - [0. 计算机网络分层基础](#0-计算机网络分层基础)
+    - [0.1 分层模型与封装解封](#01-分层模型与封装解封)
+    - [0.2 物理层：频率、波长与 2.4/5 GHz 之争](#02-物理层频率波长与-245-ghz-之争)
+    - [0.3 链路层：802.11 角色、SSID 与二层隔离](#03-链路层80211-角色ssid-与二层隔离)
+    - [0.4 网络层：IPv4 地址、子网、路由与 NAT](#04-网络层ipv4-地址子网路由与-nat)
+    - [0.5 传输层：端口号、UDP 与 TCP](#05-传输层端口号udp-与-tcp)
+    - [0.6 收束：一次数据包的旅程](#06-收束一次数据包的旅程)
+  - [1. micro-ROS 与 ESP32 的网络配置工具](#1-micro-ros-与-esp32-的网络配置工具)
+    - [1.1 系统两侧与两条数据通道](#11-系统两侧与两条数据通道)
+    - [1.2 固件侧配置工具](#12-固件侧配置工具)
+    - [1.3 上位机侧工具](#13-上位机侧工具)
+    - [1.4 第 0 节概念到两侧工具的映射](#14-第-0-节概念到两侧工具的映射)
+  - [2. 当前网络拓扑方案：下位机 STA 为主、AP 备用](#2-当前网络拓扑方案下位机-sta-为主ap-备用)
+    - [2.1 主备决策逻辑](#21-主备决策逻辑)
+    - [2.2 外部 AP 的形态选择：为何以电脑热点为主载体](#22-外部-ap-的形态选择为何以电脑热点为主载体)
+    - [2.3 两拓扑网络画像](#23-两拓扑网络画像)
+    - [2.4 代码路径](#24-代码路径)
+    - [2.5 局限](#25-局限)
+  - [3. 使用指导：nmcli 建网与 Agent 启动](#3-使用指导nmcli-建网与-agent-启动)
+    - [3.1 拓扑 A（主）：电脑热点 + 固件 STA](#31-拓扑-a主电脑热点--固件-sta)
+    - [3.2 拓扑 B（备）：固件 AP 自组网 + 上位机 STA](#32-拓扑-b备固件-ap-自组网--上位机-sta)
+    - [3.3 联调验证](#33-联调验证)
+    - [3.4 排障速查（操作级，按层自底向上）](#34-排障速查操作级按层自底向上)
+  - [4. 排障记录：AP 模式首版周期性复位](#4-排障记录ap-模式首版周期性复位)
+    - [4.1 症状](#41-症状)
+    - [4.2 复现与 bug 版本代码](#42-复现与-bug-版本代码)
+    - [4.3 反汇编取证](#43-反汇编取证)
+    - [4.4 根因链（结合 rclc/rmw 源码）](#44-根因链结合-rclcrmw-源码)
+    - [4.5 修复与结论](#45-修复与结论)
+
 ---
 
 ## 0. 计算机网络分层基础
@@ -325,7 +359,7 @@ static inline void wifi_role_boot(IPAddress& agent_ip) {
 source /opt/ros/jazzy/setup.bash
 source ~/Documents/ROS/YuXiangROS/Chap9/Robot_ws/install/setup.bash
 
-# 确认网卡设备名 (示例 wlan0, 实际以输出为准)
+# 确认网卡设备名 (示例 wlp14s0, 实际以输出为准)
 nmcli device status
 ```
 
@@ -341,14 +375,14 @@ iw list | sed -n '/Supported interface modes/,/^$/p'
 
 # [首次启动] 2. 创建热点连接 (band bg 锁 2.4G; channel 取 1/6/11 中不拥挤者)
 #             首次执行生成名为 Hotspot 的连接 profile, 此后不必重复本步
-nmcli device wifi hotspot ifname wlan0 ssid <"YOUR_HOTPOT_SSID"> \
+nmcli device wifi hotspot ifname wlp14s0 ssid <"YOUR_HOTPOT_SSID"> \
   password <"YOUR_HOTPOT_PASSWORD"> band bg channel 6
 
 # [每次] 3. 开热点 (profile 已存在, 只拉起)
 nmcli connection up Hotspot
 
 # [每次] 4. 验证热点自身 IP 应为 10.42.0.1/24 (与固件 AGENT_IP_STR 对齐)
-nmcli -f IP4.ADDRESS,IP4.GATEWAY device show wlan0
+nmcli -f IP4.ADDRESS,IP4.GATEWAY device show wlp14s0
 ```
 
 上位机启动 Agent（拓扑 A）：
@@ -379,7 +413,7 @@ pio run -e test06_wifi -t upload
 ```bash
 # [首次启动] 1. 连下位机热点之前: 建 STA profile
 #             autoconnect no: 备用拓扑手动拉起, 避免开机抢连
-nmcli connection add type wifi ifname wlan0 con-name AgentSTA \
+nmcli connection add type wifi ifname wlp14s0 con-name AgentSTA \
   autoconnect no ssid "fishbot-ap"
 
 # [首次启动] 2. WPA2 凭据 (须与 config.h WIFI_AP_PASS 一致)
@@ -401,7 +435,7 @@ nmcli connection up AgentSTA
 nmcli connection up AgentSTA
 
 # [每次] 验证: 本机 IP 应为 192.168.4.100, 且能 ping 通 ESP32 网关
-ip addr show wlan0
+ip addr show wlp14s0
 ping -c 3 192.168.4.1
 
 # [每次] 启动 Agent
