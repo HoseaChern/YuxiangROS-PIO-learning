@@ -2,7 +2,7 @@
 
 > 整理日期：2026-09-09 适用平台：Ubuntu 24.04 + NetworkManager；ROS 2 Jazzy 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_ROLE_AP`、`WIFI_SSID`/`WIFI_PASS`、`WIFI_AP_SSID`/`WIFI_AP_PASS`/`WIFI_AP_CHANNEL`） 上位机 Agent 工作区：`~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`（本文第 1、3 节引述） 拓扑方案原型固件：`test06_wifi`（`pio run -e test06_wifi`）
 
-本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证）。
+本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证，以及崩溃条件的分解与跨固件对照）。
 
 ## 目录
 
@@ -37,6 +37,11 @@
     - [4.3 反汇编取证](#43-反汇编取证)
     - [4.4 根因链（结合 rclc/rmw 源码）](#44-根因链结合-rclcrmw-源码)
     - [4.5 修复与结论](#45-修复与结论)
+    - [4.6 崩溃条件的分解与跨固件对照](#46-崩溃条件的分解与跨固件对照)
+      - [4.6.1 三个必要条件](#461-三个必要条件)
+      - [4.6.2 句柄容量非零时的条件性返回](#462-句柄容量非零时的条件性返回)
+      - [4.6.3 跨固件对照](#463-跨固件对照)
+      - [4.6.4 结论](#464-结论)
 
 ---
 
@@ -620,6 +625,78 @@ while (true) {
 1. 崩溃根因是"初始化返回值不检查 + 句柄容量为 0"两处叠加：对象未就绪时任务函数越过函数尾返回，触发 FreeRTOS 失效栈取指；
 2. `endPacket(): could not send data: 12` 是伴随症状而非根因，由 `run_xrce_session` 在 Agent 不可达时阻塞重试发送所致，与是否连接 Agent 无关；
 3. `xTaskCreate` 任务函数永不 return 是基本约束，失败路径只能延时重建，不能越过函数尾。
+
+### 4.6 崩溃条件的分解与跨固件对照
+
+第 4.4 节的根因链可分解为三个相互独立的条件。判据均取自此仓库内嵌库源码，可逐行核对。
+
+#### 4.6.1 三个必要条件
+
+| 条件  | 含义                                         | 源码判据                                                                                                                                                                                                                                                                                                     |
+| ----- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| $C_1$ | executor 句柄容量为 0，executor 从未被初始化 | `executor.c:108-111` 对 `number_of_handles == 0` 直接 `return RCL_RET_INVALID_ARGUMENT`；该返回早于 `executor.c:114-115` 的 `(*executor) = rclc_executor_get_zero_initialized_executor(); executor->context = context;`，故 `executor.context` 保持 `NULL`                                                   |
+| $C_2$ | 初始化返回值不检查，控制流仍能到达 `spin`    | `rclc/init.c:69-74` 仅把 `rcl_init` 的错误码上抛，调用方不接即静默；`rcl/init.c:222-229` 在 `rmw_init` 失败时 `goto fail`；`rmw_init.c:308-313` 在 `uxr_create_session` 失败时置 `context->impl = NULL` 并返回 `RMW_RET_ERROR`；`rcl/context.c:105-109` 的 `__cleanup_context` 把 `instance_id_storage` 归零 |
+| $C_3$ | `spin` 返回后任务函数可达函数尾              | 任务函数末尾无可退出的外层循环；`executor.c:1982-1988` 的 `rclc_executor_spin` 为 `while(true)` 调 `spin_some`，遇非 OK/非 TIMEOUT 即 `return`                                                                                                                                                               |
+
+三者各自的作用：
+
+- $C_1$ 使 `spin` 无条件立即返回。`executor.context == NULL` 时，`executor.c:1808-1811` 的 `rcl_context_is_valid(NULL)` 为假，`spin_some` 直接返回 `RCL_RET_ERROR`，与 support 是否初始化成功无关；
+- $C_2$ 使控制流能到达 `spin`。任一步失败即 `return` 时，链路在到达 `spin` 之前终止；
+- $C_3$ 把"`spin` 返回"升级为"任务函数返回"。只有越过函数尾，才触发第 4.3 节的失效栈取指。
+
+因此该崩溃的充分条件链为：
+
+$$
+\text{crash} = C_1 \wedge C_2 \wedge C_3
+$$
+
+三项缺一，链路即断。这解释了同一缺陷类在不同固件上可见性的差异。
+
+#### 4.6.2 句柄容量非零时的条件性返回
+
+$C_1$ 不是 `spin` 返回的唯一来源。`number_of_handles >= 1` 时 `executor.context = &support.context`，`spin_some` 在 `rcl_wait` 上阻塞后返回 `RCL_RET_OK`（`executor.c:1954-1955` 以 `RCLC_UNUSED(rc)` 丢弃 `rcl_wait` 的返回值，稳态返回值来自其后的调度函数），外层 `while(true)` 因此不退出。此时 `spin` 是否返回取决于 support 是否初始化成功：
+
+- support 成功：`rcl_context_is_valid`（`rcl/context.c:90-94`，判据为 `instance_id_storage != 0`）为真，`spin` 永不返回；
+- support 失败：`instance_id_storage` 已被 `__cleanup_context` 归零，`spin` 每轮立即返回 `RCL_RET_ERROR`，此时 $C_3$ 若成立即崩溃。
+
+句柄容量非零只是把"必然返回"降级为"条件返回"，条件为 support 初始化失败，并未消除 $C_3$。
+
+#### 4.6.3 跨固件对照
+
+本工程使用 micro-ROS 的固件共 5 个，即 `platformio.ini` 中配置 `board_microros_transport = wifi` 的 5 个环境：`esp32-s3-devkitc-1`（主固件）、`test06_wifi`、`test07_Subscription`、`test08_Publisher`、`test13_balance`。
+
+| 固件                            | 句柄容量 | $C_1$  | $C_2$  | $C_3$  | 结果                         |
+| ------------------------------- | -------- | ------ | ------ | ------ | ---------------------------- |
+| `test06_wifi` 首版（`eb9a540`） | 0        | 成立   | 成立   | 成立   | 崩溃（第 4.1 节）            |
+| `test06_wifi` 现状              | 1        | 不成立 | 不成立 | 不成立 | 安全                         |
+| `test07_Subscription`           | 1        | 不成立 | 成立   | 成立   | 潜在崩溃                     |
+| `test08_Publisher`              | 2        | 不成立 | 成立   | 成立   | 潜在崩溃（另有一处偶然屏蔽） |
+| `test13_balance`                | 2        | 不成立 | 成立   | 不成立 | 结构不可达                   |
+| `esp32-s3-devkitc-1`            | 3        | 不成立 | 成立   | 不成立 | 结构不可达                   |
+
+$C_3$ 的判据是任务函数内是否存在不可退出的外层循环：
+
+- `test13_balance/main.cpp:469-482` 与 `src/main.cpp:666-679` 的 `for (;;)` 内无 `break`、无 `return`，函数在结构上到不了函数尾；
+- `test07_Subscription/main.cpp:158` 与 `test08_Publisher/main.cpp:249` 的 `rclc_executor_spin` 即函数最后一条语句，其后为函数尾。
+
+`test08` 另有一处非设计意图的屏蔽，即 `test08_Publisher/main.cpp:237-241` 的时间同步循环：
+
+```cpp
+while (!rmw_uros_epoch_synchronized()) {
+    rmw_uros_sync_session(SYNC_ATTEMPT_MS);
+    delay(SYNC_POLL_MS);
+}
+```
+
+Agent 不可达时该循环的退出条件永不满足，函数停于循环内而不返回。该屏蔽只覆盖"开机时 Agent 不可达"这一条路径。
+
+`test07` 与 `test08` 实测未复现第 4.1 节的崩溃，原因是运行条件始终满足"Agent 可达、support 初始化成功"，使 `spin` 阻塞不返回，而非结构上不可能返回。开机时 Agent 不可达的路径为：`uxr_create_session` 失败（`rmw_init.c:308`）-> `rcl_init` 失败（`rcl/init.c:222-229`）-> `instance_id_storage` 归零（`rcl/context.c:109`）-> `spin_some` 返回 `RCL_RET_ERROR`（`executor.c:1808-1811`）-> `spin` 返回（`executor.c:1984-1987`）-> 任务函数越过函数尾。
+
+#### 4.6.4 结论
+
+1. 第 4.1 节崩溃的充分条件链是 $C_1 \wedge C_2 \wedge C_3$。其中 $C_1$ 是决定性一项：它使 `spin` 无条件立即返回，且与 support 是否初始化成功无关；
+2. 句柄容量非零的固件，其是否崩溃由"support 是否初始化成功"与"任务函数能否越过函数尾"两因素决定；
+3. 任务函数永不 return 是基本约束（同 4.5 节第 3 条）。不满足该约束的固件即使句柄容量合法，在 support 初始化失败时仍可复现同一崩溃。
 
 ---
 
