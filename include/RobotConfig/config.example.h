@@ -16,7 +16,9 @@
  *   - 话题名与节点名
  *
  * 不收纳: EXECUTOR_HANDLES 等按各固件 micro-ROS 订阅/定时器数量取值的常量, 保留在各固件本地定义
- * (main=2 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1)。
+ * (main=3 / test07=1 / test08=2 / test13=2; test06 无订阅/定时器, 契约要求句柄容量 >= 1, 取 1);
+ * 平衡车固件 (main / test13) 的节点名 BALANCE_NODE_NAME="fishbot_balance" 亦为本地定义,
+ * 与本文件的 NODE_NAME (test06/07/08) 互相区分。
  */
 #ifndef ROBOTCONFIG_H
 #define ROBOTCONFIG_H
@@ -118,14 +120,17 @@ constexpr uint32_t SYNC_POLL_MS = 10;      // 时间同步轮询间隔, 单位 m
 
 constexpr uint32_t BRIDGE_STACK_SIZE = 8192; // bridge_task 任务栈字节数
 constexpr uint8_t BRIDGE_TASK_PRIO = 1;      // bridge_task 任务优先级
+// 任务核心号 0: 透传依赖 WiFi/TCP, 与网络协议栈同核可避免跨核调度开销
+constexpr uint8_t BRIDGE_TASK_CORE = 0;
 
 // ---- 话题与节点 ----
 
-constexpr char CMD_VEL_TOPIC[] = "/cmd_vel";           // 速度指令话题名
-constexpr char NODE_NAME[] = "fishbot_motion_control"; // 节点名
-constexpr char ODOM_TOPIC[] = "/odom";                 // 里程计话题名
+constexpr char CMD_VEL_TOPIC[] = "/cmd_vel"; // 速度指令话题名
+// 节点名: test06/07/08 用; 平衡车固件 (main / test13) 本地定义 BALANCE_NODE_NAME
+constexpr char NODE_NAME[] = "fishbot_motion_control";
+constexpr char ODOM_TOPIC[] = "/odom"; // 里程计话题名
 
-// ---- 激光雷达转接 (test09_bridge 透传固件) ----
+// ---- 激光雷达转接 (test09_bridge / 主固件 bridge_task) ----
 // X2L 接口 (MX1.25-4P, 线序从左到右 M_CTR->GND->Tx->VCC):
 //   VCC(5V) -> 电源 5V; GND -> GND; Tx -> 本固件 UART RX; M_CTR -> PWM 调速
 // 注意: X2L 无数据 RX 引脚, 数据仅从 Tx 出 (单通道)。
@@ -142,7 +147,7 @@ constexpr uint32_t LIDAR_MOTOR_SPEED =
 constexpr uint16_t BRIDGE_TCP_PORT = 8889;     // 上位机 ros_serial2wifi tcp_server 端口
 constexpr uint32_t BRIDGE_RECONNECT_MS = 1000; // TCP 断线重连间隔, 单位 ms
 
-// ---- 直立环参数 (test10_upright) ----
+// ---- 直立环参数 (test10_upright / test11_speed / test12_turn / test13_balance / 主固件) ----
 // I2C 引脚从 N16R8 空闲集合 {3,46,9,10,11,12} 中选取:
 // 避开 strapping 引脚 3/46, 取 9/10 (无其他复用冲突); MPU6050 模块板载上拉电阻
 
@@ -170,7 +175,7 @@ constexpr uint16_t UPRIGHT_CALIB_CYCLES = 40;
 
 constexpr uint32_t IDLE_LOOP_MS = 1000; // 主循环空转延时, 单位 ms (控制全在 balance_task)
 
-// ---- 速度环参数 (test11_speed) ----
+// ---- 速度环参数 (test11_speed / 主固件) ----
 // 速度环为外环 (PI, 无 D), 输出为期望角度增量 (deg), 从 theta_0 减去后作为直立环目标:
 // target_angle = theta_0 - speed_output, 对应 docs 3.3 串级公式 ③
 // 注意: update_pwm_speed 输出经四舍五入取整为 int16_t, 分辨率 1deg, 整定时留意
@@ -182,7 +187,7 @@ constexpr float SPEED_OUTPUT_LIMIT = 10.0f;   // 速度环输出限幅 (角度�
 constexpr float SPEED_SETPOINT_MM_S = 0.0f;   // 默认目标速度, 单位 mm/s (未武装时 '+'/'-' 串口设定)
 constexpr float SPEED_STEP_MM_S = 10.0f;      // 串口调速步进, 单位 mm/s ('+' 加 / '-' 减)
 
-// ---- 转向环参数 (test12_turn / test13_balance) ----
+// ---- 转向环参数 (test12_turn / test13_balance / 主固件) ----
 // 指令项增益(开环转角驱动), 单位 PWM/deg (0.5 起步: 低于此单步差速<死区, 轮子不转)
 constexpr float TURN_KP = 1.0f;
 constexpr float TURN_KI = 0.0f; // 积分增益 (占位)
@@ -190,7 +195,7 @@ constexpr float TURN_KD = 0.6f; // 阻尼项增益(角速度阻尼), 单位 PWM/
 constexpr float TURN_PWM_LIMIT = 60.0f;      // 转向环输出限幅 (差速量 Δ, PWM), 防 Δ 过大破坏平衡
 constexpr float TURN_ANGLE_STEP_DEG = 30.0f; // 串口转向步进角, 单位 deg ('l'/'r' 每次步进)
 
-// ---- 无线操控参数 (test13_balance micro-ROS 键盘遥控固件) ----
+// ---- 无线操控参数 (test13_balance / 主固件: micro-ROS 无线遥控) ----
 // /cmd_vel 指令限幅: teleop_twist_keyboard 默认 linear.x=0.5 m/s、angular.z=1.0 rad/s,
 // 平衡车本体调节能力有限, 固件侧限幅兜底; 上位机也可用 teleop 参数降速
 // (例如 --ros-args -p linear.x:=0.2, 详细操作见 docs/Balance_Car_Notes.md 无线操控章节)
