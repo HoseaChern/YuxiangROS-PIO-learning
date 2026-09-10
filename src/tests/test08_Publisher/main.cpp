@@ -23,6 +23,7 @@
 #include <rclc/rclc.h>
 
 #include "config.h"
+#include "net_boot.h"
 
 // ============================================================================
 // 全局状态: 匿名命名空间限定为本文件（内部链接），符合 C++ 规范
@@ -191,14 +192,10 @@ void micro_ros_task(void* parameter) {
     static geometry_msgs__msg__Twist sub_msg; // 订阅的速度消息
     static rcl_timer_t timer;                 // 定时器
 
-    // 1. 设置传输协议并延时等待设置完成
-    // 主机 IP 地址: hostname -I / ipconfig / ip addr show
-    // 注意, lo(本地回环)和state DOWN/NO-CARRIER(未工作)两类应当忽略
-    // 这里最好用 IPv4
+    // 1. 网络自举并延时等待设置完成 (STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定)
     IPAddress agent_ip;
-    agent_ip.fromString(AGENT_IP_STR);
-    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
-    delay(TRANSPORT_SETUP_MS);
+    wifi_role_boot(agent_ip);  // 按 WIFI_ROLE_AP 决定 STA 接入或 AP 自组网
+    delay(TRANSPORT_SETUP_MS); // 等待传输层设置完成
 
     // 2. 初始化内存分配器
     allocator = rcl_get_default_allocator();

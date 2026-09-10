@@ -64,7 +64,27 @@ static inline void wifi_role_boot(IPAddress& agent_ip) {
     );
     set_microros_wifi_ap_transports(agent_ip, AGENT_PORT);
 #else
+    // 诊断打印: 官方函数内 WiFi.begin 阻塞等待关联, 失败(频段/凭据不符)时无输出无法定位,
+    // 故连接前打印目标凭据, 连接后打印本地 IP (与 AP 分支的 softAP ready 打印对称)
+    Serial
+        .printf("[WiFi] connecting \"%s\", agent %s:%u...\n", WIFI_SSID, AGENT_IP_STR, AGENT_PORT);
     set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
+    Serial.printf("[WiFi] connected, local IP=%s\n", WiFi.localIP().toString().c_str());
+#endif
+}
+
+/**
+ * @brief 网络就绪判定 (供依赖网络的其他任务轮询, 如主固件的雷达透传任务)
+ *
+ * STA 模式判 WiFi 关联成功; AP 模式判 SoftAP 已启动。
+ * 原因: AP 模式下 STA 接口未启用, WiFi.status() 恒不等于 WL_CONNECTED,
+ * 直接依赖该判定的任务在 AP 模式下会永远等待。
+ */
+static inline bool wifi_network_ready() {
+#if WIFI_ROLE_AP == 1
+    return (WiFi.getMode() & WIFI_AP) != 0;
+#else
+    return WiFi.status() == WL_CONNECTED;
 #endif
 }
 

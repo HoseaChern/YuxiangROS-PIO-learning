@@ -40,6 +40,7 @@
 #include <SemanticEnums.h>
 
 #include "config.h"
+#include "net_boot.h"
 
 namespace {
 
@@ -424,19 +425,11 @@ void micro_ros_task(void* param) {
     // 任务起点打印: 置于首个 delay 之前, 上电后立即可见, 用于判别固件是否包含最新代码
     Serial.println("[ROS] micro_ros_task start");
 
-    // 等待 WiFi 稳定后建立 micro-ROS Agent 会话 (UDP)
-    delay(TRANSPORT_SETUP_MS);
+    // 网络自举: STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定, 并注册 UDP transport;
+    // 连接前后的诊断打印由 wifi_role_boot 内部提供 (阻塞连接失败时串口可见)
     IPAddress agent_ip;
-    agent_ip.fromString(AGENT_IP_STR);
-    // 诊断打印: 原实现调用后无任何输出, 阻塞式 WiFi 连接失败(频段/凭据)时串口静默无法定位
-    Serial.printf(
-        "[WiFi] connecting \"%s\" (2.4GHz), agent %s:%u...\n",
-        WIFI_SSID,
-        AGENT_IP_STR,
-        AGENT_PORT
-    );
-    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
-    Serial.printf("[WiFi] connected, local IP=%s\n", WiFi.localIP().toString().c_str());
+    wifi_role_boot(agent_ip);  // 按 WIFI_ROLE_AP 决定 STA 接入或 AP 自组网
+    delay(TRANSPORT_SETUP_MS); // 等待传输层设置完成
 
     rcl_allocator_t allocator = rcl_get_default_allocator();
     rclc_support_t support;

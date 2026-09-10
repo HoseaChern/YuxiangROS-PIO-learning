@@ -42,6 +42,7 @@
 #include <rclc/rclc.h>
 
 #include "config.h"
+#include "net_boot.h"
 
 // ============================================================================
 // 全局状态: 匿名命名空间限定为本文件（内部链接），符合 C++ 规范
@@ -215,8 +216,8 @@ void odom_callback(rcl_timer_t* timer, int64_t last_call_time) {
  * @param parameter 任务参数
  * @note 
  * 1. 单独创建一个任务运行 micro-ROS, 相当于一个线程
- * 2. 本任务负责 set_microros_wifi_transports() 建立 WiFi 连接;
- *    bridge_task 只等待 WiFi 就绪, 不重复 begin, 避免打断本任务的 UDP 会话。
+ * 2. 本任务负责 wifi_role_boot() 网络自举 (建立 WiFi 连接并注册 UDP transport);
+ *    bridge_task 只轮询 wifi_network_ready(), 不重复建网, 避免打断本任务的 UDP 会话。
  */
 void micro_ros_task(void* parameter) {
     (void)parameter;
@@ -230,11 +231,10 @@ void micro_ros_task(void* parameter) {
     static geometry_msgs__msg__Twist sub_msg;
     static rcl_timer_t timer;
 
-    // 1. 设置传输协议并延时等待设置完成
+    // 1. 网络自举并延时等待设置完成 (STA 接入 / AP 自组网由 WIFI_ROLE_AP 决定)
     IPAddress agent_ip;
-    agent_ip.fromString(AGENT_IP_STR);
-    set_microros_wifi_transports(WIFI_SSID, WIFI_PASS, agent_ip, AGENT_PORT);
-    delay(TRANSPORT_SETUP_MS);
+    wifi_role_boot(agent_ip);  // 按 WIFI_ROLE_AP 决定 STA 接入或 AP 自组网
+    delay(TRANSPORT_SETUP_MS); // 等待传输层设置完成
 
     // 2. 初始化内存分配器
     allocator = rcl_get_default_allocator();
@@ -300,8 +300,8 @@ void bridge_task(void* parameter) {
     uint32_t last_diag = 0;
 
     for (;;) {
-        // 1. 等待 WiFi 就绪 (由 micro_ros_task 建立)
-        if (WiFi.status() != WL_CONNECTED) {
+        // 1. 等待网络就绪 (由 micro_ros_task 自举; AP 模式下 SoftAP 启动即就绪)
+        if (!wifi_network_ready()) {
             delay(BRIDGE_RECONNECT_MS);
             continue;
         }
