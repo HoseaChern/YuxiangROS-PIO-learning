@@ -1,8 +1,8 @@
 # 上位机 WiFi 局域网配置笔记
 
-> 整理日期：2026-09-09 适用平台：Ubuntu 24.04 + NetworkManager；ROS 2 Jazzy 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_ROLE_AP`、`WIFI_SSID`/`WIFI_PASS`、`WIFI_AP_SSID`/`WIFI_AP_PASS`/`WIFI_AP_CHANNEL`） 上位机 Agent 工作区：`~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`（本文第 1、3 节引述） 拓扑方案原型固件：`test06_wifi`（`pio run -e test06_wifi`）
+> 整理日期：2026-09-09，更新日期：2026-09-10 适用平台：Ubuntu 24.04 + NetworkManager；ROS 2 Jazzy 固件侧参数入口：`include/RobotConfig/config.h`（`AGENT_IP_STR`、`AGENT_PORT=8888`、`WIFI_ROLE_AP`、`WIFI_SSID`/`WIFI_PASS`、`WIFI_AP_SSID`/`WIFI_AP_PASS`/`WIFI_AP_CHANNEL`） 上位机 Agent 工作区：`~/Documents/ROS/YuXiangROS/Chap9/Robot_ws`（本文第 1、3 节引述） 拓扑方案原型固件：`test06_wifi`（`pio run -e test06_wifi`）
 
-本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证，以及崩溃条件的分解与跨固件对照）。
+本笔记按五节组织：第 0 节是 TCP/IP 分层基础（一般性理论，与具体硬件解耦）；第 1 节是 micro-ROS 与 ESP32 网络配置工具（本工作区与 Agent 工作区源码引述）；第 2 节是当前网络拓扑方案（下位机 STA 为主、AP 备用，原型 test06）；第 3 节是完整使用流程（上位机 nmcli 配置与 Agent 启动，含首次启动特殊步骤）；第 4 节是排障记录（AP 模式首版崩溃的根因取证、崩溃条件的分解，以及全部五个 micro-ROS 固件统一的生命周期模型、修改前后的判据对照与实测结果）。
 
 ## 目录
 
@@ -36,11 +36,11 @@
     - [4.2 复现与 bug 版本代码](#42-复现与-bug-版本代码)
     - [4.3 反汇编取证](#43-反汇编取证)
     - [4.4 根因链（结合 rclc/rmw 源码）](#44-根因链结合-rclcrmw-源码)
-    - [4.5 修复与结论](#45-修复与结论)
-    - [4.6 崩溃条件的分解与跨固件对照](#46-崩溃条件的分解与跨固件对照)
-      - [4.6.1 三个必要条件](#461-三个必要条件)
+    - [4.5 修复与生命周期模型](#45-修复与生命周期模型)
+    - [4.6 崩溃条件的分解与五个固件的判据](#46-崩溃条件的分解与五个固件的判据)
+      - [4.6.1 崩溃成立的必要条件](#461-崩溃成立的必要条件)
       - [4.6.2 句柄容量非零时的条件性返回](#462-句柄容量非零时的条件性返回)
-      - [4.6.3 跨固件对照](#463-跨固件对照)
+      - [4.6.3 五个固件的判据与实测](#463-五个固件的判据与实测)
       - [4.6.4 结论](#464-结论)
 
 ---
@@ -343,7 +343,7 @@ static inline void wifi_role_boot(IPAddress& agent_ip) {
 - STA 分支：官方函数内 `WiFi.begin` 阻塞等待关联成功后注册 transport（`micro_ros_transport.h:10-14`）；
 - AP 分支：`WiFi.softAP` 开启后走同构纯 UDP 注册，跳过 `WiFi.begin`（`net_boot.h:32-45`）。
 
-固件任务骨架在 `src/tests/test06_wifi/main.cpp`：`setup` 中 `xTaskCreate(micro_ros_task, ...)`（75 行）；任务内 `wifi_role_boot` 只执行一次（110 行），随后进入"初始化 -> spin -> 释放 -> 重建"循环（118-208 行），任务永不返回（约束依据见注释 91-97）。`EXECUTOR_HANDLES=1`（21 行）满足 rclc"句柄容量须大于等于 1"的契约（注释 18-20）。
+固件任务骨架在 `src/tests/test06_wifi/main.cpp`：`setup` 中 `xTaskCreate(micro_ros_task, ...)`（86 行）；任务内 `wifi_role_boot` 只执行一次（191 行），随后进入"创建 -> spin -> 释放 -> 重建"循环（198-226 行），任务永不返回（约束依据见注释 177-181）。`EXECUTOR_HANDLES=1`（21 行）满足 rclc"句柄容量须大于等于 1"的契约（注释 19-20）。该骨架在全部五个 micro-ROS 固件中一致，差异只在实体数量、句柄容量与会话失效后的附加动作（见 4.6.3）。
 
 ### 2.5 局限
 
@@ -477,6 +477,8 @@ ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # 主固�
 注意主固件与 test13 只在武装（`/balance_enable` 为 true）后输出 PWM，
 `/cmd_vel` 本身不触发运动。
 
+启动顺序不固定：下位机先上电时，固件在 support 初始化失败分支按 `RECONNECT_INTERVAL_MS` 重试，Agent 启动后于下一个重试周期自动建链，无需复位下位机；上位机先起 Agent 时，固件首次初始化即成功。两种顺序的实测结果见 4.6.3。
+
 ### 3.4 排障速查（操作级，按层自底向上）
 
 | 现象                     | 先查什么          | 常用命令/手段                             |
@@ -486,6 +488,7 @@ ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # 主固�
 | ping 通但 Agent 无会话   | 端口/地址对齐     | `AGENT_IP_STR` 是否等于本机 IP；放行 8888 |
 | 有客户端但数据断         | 同频干扰/信号     | 换信道 1/6/11；查同名 SSID                |
 | 热点起不来               | 网卡无 AP 能力    | `iw list` 查 AP；换网卡                   |
+| 固件已上电、Agent 后启动 | 重试周期          | 等一个 `RECONNECT_INTERVAL_MS` 自动建链   |
 
 研发级根因取证（如第 4 节的 AP 崩溃）在源码层排障，不在本表范围。
 
@@ -493,7 +496,7 @@ ros2 topic pub /balance_enable std_msgs/msg/Bool "{data: true}" -r 5   # 主固�
 
 ## 4. 排障记录：AP 模式首版周期性复位
 
-本故障发生于拓扑 B（AP 备用分支，第 2 节）的首版实现：提交 `eb9a540` 引入 STA/AP 双模自举，`67a314b` 修复。修复后的参考实现即当前 `src/tests/test06_wifi/main.cpp`。以下取证全部来自本仓库内嵌库源码、git 历史与本地编译产物。
+本故障发生于拓扑 B（AP 备用分支，第 2 节）的首版实现：提交 `eb9a540` 引入 STA/AP 双模自举，`67a314b` 修复 `test06_wifi` 单固件，`bdb0f72` 把该生命周期模型统一到本工程全部五个使用 micro-ROS 的固件（判据见 4.6.3）。参考实现为 `src/tests/test06_wifi/main.cpp`。以下取证全部来自本仓库内嵌库源码、git 历史与本地编译产物。
 
 ### 4.1 症状
 
@@ -616,21 +619,34 @@ while (true) {
 
 于是 `rclc_executor_spin` 立即返回，`micro_ros_task` 越过函数尾（反汇编中的 `retw.n`）。任务函数 return 后，FreeRTOS 调度器从已失效的任务栈指针继续取指，PC 落入常量池数据区（`0x42002da8`），回溯地址 `0x42002da5` 奇数不对齐，触发 `IllegalInstruction`，复位后重复同一路径，形成约 11.2 秒周期的复位。
 
-### 4.5 修复与结论
+### 4.5 修复与生命周期模型
 
-修复提交（`67a314b`）将 `EXECUTOR_HANDLES` 改为最小合法值 1，并为四步初始化补全返回值检查、逆序释放、`spin_some` 加 `delay` 的生命周期模型（当前 `src/tests/test06_wifi/main.cpp:118-208`），任务函数永不 return。
+`67a314b` 把 `test06_wifi` 的 `EXECUTOR_HANDLES` 改为最小合法值 1，并为四步初始化补全返回值检查、逆序释放、`spin_some` 加 `delay`；`bdb0f72` 把该模型统一到全部五个 micro-ROS 固件。模型以 `test06_wifi` 为参考（`src/tests/test06_wifi/main.cpp:185-227`）：
+
+| 环节     | 实现                                                                                  | 作用                                     |
+| -------- | ------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 网络自举 | `wifi_role_boot` + `delay(TRANSPORT_SETUP_MS)`，仅执行一次                            | transport 注册与 rmw 会话建立解耦        |
+| 实体创建 | `create_entities()` 逐步检查返回值，任一步失败返回 `false`                            | 失败不进入 spin                          |
+| 主循环   | `for (;;)`：创建失败即释放 + `delay(RECONNECT_INTERVAL_MS)` + `continue`              | 任务无出口，结构上到不了函数尾           |
+| 轮询     | `rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10))` + `delay(1)`                   | 空等待集下让出 CPU，会话失效时返回错误码 |
+| 实体释放 | `destroy_entities()` 按创建逆序 `fini`，入口以 `support.context.impl == nullptr` 早退 | 对部分创建状态幂等，不产生无效解引用     |
+
+修改前的 `eb9a540` 为直线式：`support`、`node`、`executor` 三次初始化后直接 `rclc_executor_spin(&executor)`，函数随后越过函数尾（代码见 4.2 节，反汇编见 4.3 节）。
+
+各环节常量取自 `include/RobotConfig/config.example.h:110-117`：`TRANSPORT_SETUP_MS=2000`、`RECONNECT_INTERVAL_MS=2000`、`SYNC_ATTEMPT_MS=1000`。
 
 结论：
 
 1. 崩溃根因是"初始化返回值不检查 + 句柄容量为 0"两处叠加：对象未就绪时任务函数越过函数尾返回，触发 FreeRTOS 失效栈取指；
 2. `endPacket(): could not send data: 12` 是伴随症状而非根因，由 `run_xrce_session` 在 Agent 不可达时阻塞重试发送所致，与是否连接 Agent 无关；
-3. `xTaskCreate` 任务函数永不 return 是基本约束，失败路径只能延时重建，不能越过函数尾。
+3. `xTaskCreate` 任务函数永不 return 是基本约束，失败路径只能延时重建，不能越过函数尾；
+4. 会话失效后的恢复手段是整体释放并重建 support：rmw 无重建既有会话的路径（`uxr_create_session` 只在 `rmw_init` 中调用），仅重建 support 能重新建链；主固件与 `test13_balance` 在重建前先清空命令与武装请求，避免控制任务按陈旧指令继续输出。
 
-### 4.6 崩溃条件的分解与跨固件对照
+### 4.6 崩溃条件的分解与五个固件的判据
 
-第 4.4 节的根因链可分解为三个相互独立的条件。判据均取自此仓库内嵌库源码，可逐行核对。
+第 4.4 节的根因链可分解为三个相互独立的条件。判据均取自此仓库内嵌库源码与本地固件源码，可逐行核对。
 
-#### 4.6.1 三个必要条件
+#### 4.6.1 崩溃成立的必要条件
 
 | 条件  | 含义                                         | 源码判据                                                                                                                                                                                                                                                                                                     |
 | ----- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -644,13 +660,13 @@ while (true) {
 - $C_2$ 使控制流能到达 `spin`。任一步失败即 `return` 时，链路在到达 `spin` 之前终止；
 - $C_3$ 把"`spin` 返回"升级为"任务函数返回"。只有越过函数尾，才触发第 4.3 节的失效栈取指。
 
-因此该崩溃的充分条件链为：
+因此 4.1 节崩溃的充分条件链为：
 
 $$
 \text{crash} = C_1 \wedge C_2 \wedge C_3
 $$
 
-三项缺一，链路即断。这解释了同一缺陷类在不同固件上可见性的差异。
+三项缺一，链路即断。4.6.3 逐项核对五个固件对三条条件的判据。
 
 #### 4.6.2 句柄容量非零时的条件性返回
 
@@ -659,27 +675,38 @@ $C_1$ 不是 `spin` 返回的唯一来源。`number_of_handles >= 1` 时 `execut
 - support 成功：`rcl_context_is_valid`（`rcl/context.c:90-94`，判据为 `instance_id_storage != 0`）为真，`spin` 永不返回；
 - support 失败：`instance_id_storage` 已被 `__cleanup_context` 归零，`spin` 每轮立即返回 `RCL_RET_ERROR`，此时 $C_3$ 若成立即崩溃。
 
-句柄容量非零只是把"必然返回"降级为"条件返回"，条件为 support 初始化失败，并未消除 $C_3$。
+句柄容量非零只是把"必然返回"降级为"条件返回"，条件为 support 初始化失败，并未消除 $C_3$。修改前 `test07_Subscription` 与 `test08_Publisher` 即处于该状态（判据见 4.6.3）。
 
-#### 4.6.3 跨固件对照
+#### 4.6.3 五个固件的判据与实测
 
-本工程使用 micro-ROS 的固件共 5 个，即 `platformio.ini` 中配置 `board_microros_transport = wifi` 的 5 个环境：`esp32-s3-devkitc-1`（主固件）、`test06_wifi`、`test07_Subscription`、`test08_Publisher`、`test13_balance`。
+本工程使用 micro-ROS 的固件共 5 个，即 `platformio.ini` 中配置 `board_microros_transport = wifi` 的 5 个环境：`esp32-s3-devkitc-1`（主固件）、`test06_wifi`、`test07_Subscription`、`test08_Publisher`、`test13_balance`。五个固件共用 4.5 节的生命周期模型，判据逐项列出，修改前以 `bdb0f72^` 为基线（行号同取该版本）。
 
-| 固件                            | 句柄容量 | $C_1$  | $C_2$  | $C_3$  | 结果                         |
-| ------------------------------- | -------- | ------ | ------ | ------ | ---------------------------- |
-| `test06_wifi` 首版（`eb9a540`） | 0        | 成立   | 成立   | 成立   | 崩溃（第 4.1 节）            |
-| `test06_wifi` 现状              | 1        | 不成立 | 不成立 | 不成立 | 安全                         |
-| `test07_Subscription`           | 1        | 不成立 | 成立   | 成立   | 潜在崩溃                     |
-| `test08_Publisher`              | 2        | 不成立 | 成立   | 成立   | 潜在崩溃（另有一处偶然屏蔽） |
-| `test13_balance`                | 2        | 不成立 | 成立   | 不成立 | 结构不可达                   |
-| `esp32-s3-devkitc-1`            | 3        | 不成立 | 成立   | 不成立 | 结构不可达                   |
+修改前：
 
-$C_3$ 的判据是任务函数内是否存在不可退出的外层循环：
+| 固件                  | 版本       | 句柄容量 | $C_1$  | $C_2$  | $C_3$  | 后果                           |
+| --------------------- | ---------- | -------- | ------ | ------ | ------ | ------------------------------ |
+| `test06_wifi`         | `eb9a540`  | 0        | 成立   | 成立   | 成立   | 崩溃（4.1 节）                 |
+| `test06_wifi`         | `67a314b`  | 1        | 不成立 | 不成立 | 不成立 | 安全                           |
+| `esp32-s3-devkitc-1`  | `bdb0f72^` | 3        | 不成立 | 成立   | 不成立 | 结构不可达                     |
+| `test07_Subscription` | `bdb0f72^` | 1        | 不成立 | 成立   | 成立   | 潜在崩溃                       |
+| `test08_Publisher`    | `bdb0f72^` | 2        | 不成立 | 成立   | 成立   | 潜在崩溃（受时间同步轮询抑制） |
+| `test13_balance`      | `bdb0f72^` | 2        | 不成立 | 成立   | 不成立 | 结构不可达                     |
 
-- `test13_balance/main.cpp:469-482` 与 `src/main.cpp:666-679` 的 `for (;;)` 内无 `break`、无 `return`，函数在结构上到不了函数尾；
-- `test07_Subscription/main.cpp:158` 与 `test08_Publisher/main.cpp:249` 的 `rclc_executor_spin` 即函数最后一条语句，其后为函数尾。
+修改后：
 
-`test08` 另有一处非设计意图的屏蔽，即 `test08_Publisher/main.cpp:237-241` 的时间同步循环：
+| 固件                  | 句柄容量 | $C_1$  | $C_2$  | $C_3$  | 会话失效后的附加动作 |
+| --------------------- | -------- | ------ | ------ | ------ | -------------------- |
+| `esp32-s3-devkitc-1`  | 3        | 不成立 | 不成立 | 不成立 | 清命令与武装后释放   |
+| `test06_wifi`         | 1        | 不成立 | 不成立 | 不成立 | 直接释放             |
+| `test07_Subscription` | 1        | 不成立 | 不成立 | 不成立 | 直接释放             |
+| `test08_Publisher`    | 2        | 不成立 | 不成立 | 不成立 | 直接释放             |
+| `test13_balance`      | 2        | 不成立 | 不成立 | 不成立 | 清命令与武装后释放   |
+
+修改前 $C_2$ 成立的证据是初始化调用后无错误分支：`src/main.cpp:616`、`test07_Subscription/main.cpp:146`、`test08_Publisher/main.cpp:211`、`test13_balance/main.cpp:442` 的 `rclc_executor_init` 返回值均未被消费，`eb9a540` 的 `test06_wifi/main.cpp:116` 同样未检查；这些版本内 `RCL_RET_OK` 只出现在 `publish` 与 `spin_some` 的调用处。
+
+修改前 $C_3$ 成立的证据是 `spin` 为任务函数最后一条语句：`test07_Subscription/main.cpp:158` 与 `test08_Publisher/main.cpp:249` 的 `rclc_executor_spin(&executor)` 之后即函数结尾。
+
+修改前 $C_3$ 存在一处非设计意图的抑制：`test08_Publisher/main.cpp:237-241` 的时间同步为轮询，Agent 不可达时退出条件永不满足，函数停于循环内而不返回。
 
 ```cpp
 while (!rmw_uros_epoch_synchronized()) {
@@ -688,15 +715,24 @@ while (!rmw_uros_epoch_synchronized()) {
 }
 ```
 
-Agent 不可达时该循环的退出条件永不满足，函数停于循环内而不返回。该屏蔽只覆盖"开机时 Agent 不可达"这一条路径。
+该抑制只覆盖"开机时 Agent 不可达"一条路径，代价是会话在此期间不可用：固件停在循环内，既不复位也不重建，须复位下位机后才能建链。主固件修改前同为轮询（`src/main.cpp:655-657`），其 $C_3$ 本不成立，表现出的现象相同，但不涉及任务函数越过函数尾。
 
-`test07` 与 `test08` 实测未复现第 4.1 节的崩溃，原因是运行条件始终满足"Agent 可达、support 初始化成功"，使 `spin` 阻塞不返回，而非结构上不可能返回。开机时 Agent 不可达的路径为：`uxr_create_session` 失败（`rmw_init.c:308`）-> `rcl_init` 失败（`rcl/init.c:222-229`）-> `instance_id_storage` 归零（`rcl/context.c:109`）-> `spin_some` 返回 `RCL_RET_ERROR`（`executor.c:1808-1811`）-> `spin` 返回（`executor.c:1984-1987`）-> 任务函数越过函数尾。
+修改后三条判据均不成立，证据取自当前源码：
+
+- $C_1$ 不成立：句柄容量分别为 3、1、1、2、2，均大于等于 1；`rclc_executor_init` 的返回值由 `create_entities` 检查，非 `RCL_RET_OK` 即返回 `false`；
+- $C_2$ 不成立：`create_entities` 对 support、node、executor 及后续全部句柄逐项检查返回值，任一步失败即返回 `false`，控制流不进入 spin，故不存在初始化失败仍到达 spin 的路径；
+- $C_3$ 不成立：`src/main.cpp:839-874`、`test06_wifi/main.cpp:198-226`、`test07_Subscription/main.cpp:264-292`、`test08_Publisher/main.cpp:395-423`、`test13_balance/main.cpp:597-632` 的 `micro_ros_task` 均以 `for (;;)` 为唯一外层结构，内层轮询循环的 `break` 只跳出内层，其后是释放与延时，随后回到 `for (;;)` 头部；函数内无 `return` 语句，结构上到不了函数尾。
+
+修改后时间同步由轮询改为单次尝试：`rmw_uros_sync_session(SYNC_ATTEMPT_MS)` 返回非 `RMW_RET_OK` 即 `return false`（`src/main.cpp:728-737`、`test08_Publisher/main.cpp:286-295`）。同步失败归入创建失败路径，由 $C_2$ 的检查终止。
+
+实测（2026-09-10，五个固件逐一烧录）：两种启动顺序均一次建链，串口打印 `node "..." ready, spinning` 后不再复位。下位机先上电、Agent 后启动时，固件在 support 初始化失败分支按 `RECONNECT_INTERVAL_MS` 重试，Agent 上线后于下一个重试周期建链，无需复位下位机。
 
 #### 4.6.4 结论
 
-1. 第 4.1 节崩溃的充分条件链是 $C_1 \wedge C_2 \wedge C_3$。其中 $C_1$ 是决定性一项：它使 `spin` 无条件立即返回，且与 support 是否初始化成功无关；
-2. 句柄容量非零的固件，其是否崩溃由"support 是否初始化成功"与"任务函数能否越过函数尾"两因素决定；
-3. 任务函数永不 return 是基本约束（同 4.5 节第 3 条）。不满足该约束的固件即使句柄容量合法，在 support 初始化失败时仍可复现同一崩溃。
+1. 第 4.1 节崩溃的充分条件链是 $C_1 \wedge C_2 \wedge C_3$。$C_1$ 是决定性一项：它使 `spin` 无条件立即返回，且与 support 是否初始化成功无关；
+2. 句柄容量非零只把必然返回降级为条件返回，条件为 support 初始化失败；除容量外，还须以返回值检查阻断 $C_2$、以不可退出的外层循环阻断 $C_3$；
+3. 当前五个 micro-ROS 固件对三条条件的判据均为不成立，$C_1 \wedge C_2 \wedge C_3$ 在结构上不可满足，且经硬件实测未复现第 4.1 节的复位；
+4. 任务函数永不 return 是基本约束（同 4.5 节）。新增任务函数若不满足该约束，在 support 初始化失败时仍可复现同一崩溃。
 
 ---
 
