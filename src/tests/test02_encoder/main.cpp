@@ -44,5 +44,6 @@ void loop() {
  * 4. 根据公式计算即可: l = N * PI * D/ tick, PI 取较精确值即可
  * 
  * 最新测量值 (与 test04 标定值统一):
- * l = 0.1427138 mm / tick
+ * l = 0.1427138 mm / tick (JGA25-370 170rpm)
+ * l = 0.0449778 mm / tick (JGA25-370 60rpm)
  */
