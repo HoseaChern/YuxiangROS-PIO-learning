@@ -261,12 +261,12 @@ ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
 
 其中 `udp4` 指定以 UDP over IPv4 承载 XRCE 会话，`--port 8888` 与固件 `AGENT_PORT` 对齐。
 
-本地 Agent 工作区 `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws` 的 `src/` 含 `micro-ROS-Agent`、`robot_bringup`、`ros_serial2wifi`、`ydlidar_ros2` 等包。聚合启动文件 `robot_bringup/launch/bringup.launch.py` 把两条通道的进程集中声明：
+本地 Agent 工作区 `~/Documents/ROS/YuXiangROS/Chap9/Robot_ws` 的 `src/` 含 `micro-ROS-Agent`、`robot_bringup`、`ros_serial2wifi`、`ydlidar_ros2` 等包（末者的 ROS 包名为 `ydlidar`，目录名与包名不同；`ros2 launch` 用包名）。聚合启动文件 `robot_bringup/launch/bringup.launch.py` 把两条通道的进程集中声明：
 
 - micro-ROS Agent 节点（`bringup.launch.py:28-37`）：`executable="micro_ros_agent"`，`arguments=["udp4", "--port", "8888"]`；
 - 雷达桥节点（`bringup.launch.py:39-44`）：`executable="tcp_server"`，`parameters=[{"serial_port": "/tmp/tty_laser"}]`。
 
-雷达桥实现 `ros_serial2wifi/ros_serial2wifi/tcpserver.py` 声明参数 `tcp_port=8889`、`serial_port=/tmp/laserport`（17-18 行），绑定 `0.0.0.0`（27 行）并以伪终端符号链接暴露串口（31-33 行）。launch 覆盖 `serial_port` 为 `/tmp/tty_laser`。
+雷达桥实现 `ros_serial2wifi/ros_serial2wifi/tcpserver.py` 声明参数 `tcp_port=8889`、`serial_port=/tmp/laserport`（17-18 行），绑定 `0.0.0.0`（27 行）并以伪终端符号链接暴露串口（31-33 行）。launch 覆盖 `serial_port` 为 `/tmp/tty_laser`。不经 launch 手动运行时，两个参数须用 `--ros-args -p serial_port:=/tmp/tty_laser` 传入，裸参数不会成为 ROS 参数值（细节见 `docs/Lidar_Radar_Debugging.md` 1.3.2）。
 
 ### 1.4 第 0 节概念到两侧工具的映射
 
