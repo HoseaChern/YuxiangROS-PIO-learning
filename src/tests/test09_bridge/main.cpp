@@ -6,6 +6,7 @@
  *   1. WiFi 连接
  *   2. TCP client 主动连接上位机 ros_serial2wifi tcp_server (端口 8889)
  *   3. UART1 读取雷达 Tx 数据 (115200, 单通道), 转发到 TCP
+ *      读取与 [UART] 计数在第 0 步无条件执行, 判据不依赖 WiFi/TCP 状态
  *   4. TCP 下行数据转发回 UART (保留双向透传契约; X2L 无数据 RX, 雷达侧忽略)
  *   5. M_CTR 输出 PWM 驱动雷达电机 (DTR 无法穿透 TCP/pty, 电机须由本端驱动)
  *
@@ -84,16 +85,44 @@ void setup() {
     ledcSetup(LIDAR_PWM_CHANNEL, LIDAR_PWM_FREQ, LIDAR_PWM_RES);
     ledcAttachPin(LIDAR_MOTOR_CTRL_PIN, LIDAR_PWM_CHANNEL);
     ledcWrite(LIDAR_PWM_CHANNEL, LIDAR_MOTOR_SPEED);
-    Serial.printf("[MOTOR] M_CTR PWM: pin=%u chan=%u freq=%uHz duty=%u\n",
-                  LIDAR_MOTOR_CTRL_PIN, LIDAR_PWM_CHANNEL, LIDAR_PWM_FREQ, LIDAR_MOTOR_SPEED);
+    Serial.printf(
+        "[MOTOR] M_CTR PWM: pin=%u chan=%u freq=%uHz duty=%u\n",
+        LIDAR_MOTOR_CTRL_PIN,
+        LIDAR_PWM_CHANNEL,
+        LIDAR_PWM_FREQ,
+        LIDAR_MOTOR_SPEED
+    );
 }
 
 void loop() {
-    // 0. 诊断: 周期性打印 UART1 累计接收字节数 (排查用, 独立于 WiFi/TCP 状态)
+    // 0. 上行 + 诊断: 无条件读取 UART1 并计数 (先于 WiFi/TCP, 使 [UART] 判据与网络
+    //    状态无关); TCP 已连接时顺带转发, 未连接时读出即丢弃, 避免 RX 缓冲占满丢帧。
+    //    上位机 5s 无数据交换会断开连接, 需持续转发雷达数据; 若断开,
+    //    connect_tcp() 下一轮自动重连。
+    //    批量读写: 逐字节 write 在高数据量下会溢出 UART FIFO 导致丢帧,
+    //    这里每次最多读 512 字节一次性转发, 大幅减少 TCP 调用次数。
     static uint32_t uart_rx_total = 0;
     static uint32_t last_diag = 0;
+    static uint8_t buf[512];
+    size_t n = Serial1.available();
+    if (n > 0) {
+        if (n > sizeof(buf)) {
+            n = sizeof(buf);
+        }
+        n = Serial1.read(buf, n);
+        if (n > 0) {
+            uart_rx_total += n;
+            if (tcp_client.connected()) {
+                tcp_client.write(buf, n);
+            }
+        }
+    }
     if (millis() - last_diag >= 2000) {
-        Serial.printf("[UART] 最近 2s 收到 %u 字节\n", uart_rx_total);
+        Serial.printf(
+            "[UART] 最近 2s 收到 %u 字节 (TCP %s)\n",
+            uart_rx_total,
+            tcp_client.connected() ? "已连" : "未连"
+        );
         uart_rx_total = 0;
         last_diag = millis();
     }
@@ -110,23 +139,7 @@ void loop() {
         return;
     }
 
-    // 3. 双向透传: UART1 <-> TCP
-    //    上位机 5s 无数据交换会断开连接, 需持续转发雷达数据;
-    //    若断开, connect_tcp() 下一轮自动重连。
-    //    批量读写: 逐字节 write 在高数据量下会溢出 UART FIFO 导致丢帧,
-    //    这里每次最多读 512 字节一次性转发, 大幅减少 TCP 调用次数。
-    static uint8_t buf[512];
-    size_t n = Serial1.available();
-    if (n > 0) {
-        if (n > sizeof(buf)) {
-            n = sizeof(buf);
-        }
-        n = Serial1.read(buf, n);
-        if (n > 0) {
-            uart_rx_total += n;
-            tcp_client.write(buf, n);
-        }
-    }
+    // 3. 下行透传: TCP -> UART1 (上行已在第 0 步完成)
     size_t m = tcp_client.available();
     if (m > 0) {
         if (m > sizeof(buf)) {

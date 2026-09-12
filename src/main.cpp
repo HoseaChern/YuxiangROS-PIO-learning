@@ -540,6 +540,7 @@ bool connect_tcp() {
  * 1. 只等待 WiFi 就绪(micro_ros_task 已建立), 绝不重复 WiFi.begin()
  * 2. WiFi/UART 初始化已在 setup 完成, 本任务只做连接与双向透传
  * 3. 雷达数据为单向出 (X2L), TCP 下行映射回 UART 保持契约, 忽略雷达侧
+ * 4. 上行读 UART 与 [UART] 计数在循环第 0 步无条件执行, 判据不依赖网络状态
  */
 void bridge_task(void* parameter) {
     (void)parameter;
@@ -549,6 +550,35 @@ void bridge_task(void* parameter) {
     uint32_t last_diag = 0;
 
     for (;;) {
+        // 0. 上行 + 诊断: 无条件读取 UART1 并计数 (先于 WiFi/TCP, 使 [UART] 判据与网络
+        //    状态无关); TCP 已连接时顺带转发, 未连接时读出即丢弃, 避免 RX 缓冲占满丢帧。
+        //    上位机 5s 无数据交换会断开连接, 需持续转发雷达数据; 若断开,
+        //    connect_tcp() 下一轮自动重连。
+        //    批量读写: 逐字节 write 在高数据量下会溢出 UART FIFO 导致丢帧,
+        //    这里每次最多读 512 字节一次性转发, 大幅减少 TCP 调用次数。
+        size_t n = Serial1.available();
+        if (n > 0) {
+            if (n > sizeof(buf)) {
+                n = sizeof(buf);
+            }
+            n = Serial1.read(buf, n);
+            if (n > 0) {
+                uart_rx_total += n;
+                if (tcp_client.connected()) {
+                    tcp_client.write(buf, n);
+                }
+            }
+        }
+        if (millis() - last_diag >= 2000) {
+            Serial.printf(
+                "[UART] 最近 2s 收到 %u 字节 (TCP %s)\n",
+                uart_rx_total,
+                tcp_client.connected() ? "已连" : "未连"
+            );
+            uart_rx_total = 0;
+            last_diag = millis();
+        }
+
         // 1. 等待网络就绪 (由 micro_ros_task 自举; AP 模式下 SoftAP 启动即就绪)
         if (!wifi_network_ready()) {
             delay(BRIDGE_RECONNECT_MS);
@@ -561,22 +591,7 @@ void bridge_task(void* parameter) {
             continue;
         }
 
-        // 3. 双向透传: UART1 <-> TCP
-        //    上位机 5s 无数据交换会断开连接, 需持续转发雷达数据;
-        //    若断开, connect_tcp() 下一轮自动重连。
-        //    批量读写: 逐字节 write 在高数据量下会溢出 UART FIFO 导致丢帧,
-        //    这里每次最多读 512 字节一次性转发, 大幅减少 TCP 调用次数。
-        size_t n = Serial1.available();
-        if (n > 0) {
-            if (n > sizeof(buf)) {
-                n = sizeof(buf);
-            }
-            n = Serial1.read(buf, n);
-            if (n > 0) {
-                uart_rx_total += n;
-                tcp_client.write(buf, n);
-            }
-        }
+        // 3. 下行透传: TCP -> UART1 (上行已在第 0 步完成)
         size_t m = tcp_client.available();
         if (m > 0) {
             if (m > sizeof(buf)) {
@@ -586,13 +601,6 @@ void bridge_task(void* parameter) {
             if (m > 0) {
                 Serial1.write(buf, m);
             }
-        }
-
-        // 4. 诊断: 每 2s 打印 UART1 累计接收字节 (独立于 WiFi/TCP 状态)
-        if (millis() - last_diag >= 2000) {
-            Serial.printf("[UART] 最近 2s 收到 %u 字节\n", uart_rx_total);
-            uart_rx_total = 0;
-            last_diag = millis();
         }
     }
 }
